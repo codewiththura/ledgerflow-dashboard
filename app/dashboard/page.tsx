@@ -22,7 +22,22 @@ import {
   Calendar,
   Wallet
 } from "lucide-react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from "recharts";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line } from "recharts";
+
+const formatDateLabel = (label: any): any => {
+  if (typeof label !== "string") return label;
+  if (!label) return "";
+  try {
+    const parts = label.split("-");
+    if (parts.length !== 3) return label;
+    const [year, month, day] = parts;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    if (isNaN(date.getTime())) return label;
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  } catch {
+    return label;
+  }
+};
 
 interface ProductItem {
   productId: string;
@@ -41,6 +56,7 @@ interface Sale {
   subtotal: number;
   total: number;
   approved: boolean;
+  shared?: boolean;
   createdAt: string;
 }
 
@@ -50,6 +66,7 @@ interface Expense {
   amount: number;
   date: string;
   approved: boolean;
+  shared?: boolean;
   createdAt: string;
 }
 
@@ -180,19 +197,42 @@ export default function DashboardPage() {
   const metrics = useMemo(() => {
     const { filteredSales, filteredExpenses } = filteredData;
 
-    // Distinct Customers
+    // Distinct Customers (calculated using sale.transactionName)
     const customerSet = new Set<string>();
+    const sharedCustomerSet = new Set<string>();
+    const privateCustomerSet = new Set<string>();
+
     let totalSalesVal = 0;
+    let sharedSalesVal = 0;
+    let privateSalesVal = 0;
     filteredSales.forEach((sale) => {
-      if (sale.customerSocialName) {
-        customerSet.add(sale.customerSocialName.trim().toLowerCase());
+      if (sale.transactionName) {
+        const cName = sale.transactionName.trim().toLowerCase();
+        customerSet.add(cName);
+        if (sale.shared === true) {
+          sharedCustomerSet.add(cName);
+        } else {
+          privateCustomerSet.add(cName);
+        }
       }
       totalSalesVal += sale.total;
+      if (sale.shared === true) {
+        sharedSalesVal += sale.total;
+      } else {
+        privateSalesVal += sale.total;
+      }
     });
 
     let totalExpensesVal = 0;
+    let sharedExpensesVal = 0;
+    let privateExpensesVal = 0;
     filteredExpenses.forEach((exp) => {
       totalExpensesVal += exp.amount;
+      if (exp.shared === true) {
+        sharedExpensesVal += exp.amount;
+      } else {
+        privateExpensesVal += exp.amount;
+      }
     });
 
     const revenues = totalSalesVal - totalExpensesVal;
@@ -215,8 +255,14 @@ export default function DashboardPage() {
 
     return {
       customerCount: customerSet.size,
+      sharedCustomerCount: sharedCustomerSet.size,
+      privateCustomerCount: privateCustomerSet.size,
       totalSales: totalSalesVal,
+      sharedSales: sharedSalesVal,
+      privateSales: privateSalesVal,
       totalExpenses: totalExpensesVal,
+      sharedExpenses: sharedExpensesVal,
+      privateExpenses: privateExpensesVal,
       revenues,
       topProducts
     };
@@ -225,21 +271,52 @@ export default function DashboardPage() {
   // Format chart data by day / date
   const chartData = useMemo(() => {
     const { filteredSales, filteredExpenses } = filteredData;
-    const dailyMap: { [date: string]: { date: string; sales: number; expenses: number } } = {};
+    const dailyMap: { 
+      [date: string]: { 
+        date: string; 
+        sales: number; 
+        expenses: number;
+        sharedSales: number;
+        privateSales: number;
+        sharedExpenses: number;
+      } 
+    } = {};
 
     // Populate dates
     filteredSales.forEach((sale) => {
       if (!dailyMap[sale.date]) {
-        dailyMap[sale.date] = { date: sale.date, sales: 0, expenses: 0 };
+        dailyMap[sale.date] = { 
+          date: sale.date, 
+          sales: 0, 
+          expenses: 0,
+          sharedSales: 0,
+          privateSales: 0,
+          sharedExpenses: 0
+        };
       }
       dailyMap[sale.date].sales += sale.total;
+      if (sale.shared === true) {
+        dailyMap[sale.date].sharedSales += sale.total;
+      } else {
+        dailyMap[sale.date].privateSales += sale.total;
+      }
     });
 
     filteredExpenses.forEach((exp) => {
       if (!dailyMap[exp.date]) {
-        dailyMap[exp.date] = { date: exp.date, sales: 0, expenses: 0 };
+        dailyMap[exp.date] = { 
+          date: exp.date, 
+          sales: 0, 
+          expenses: 0,
+          sharedSales: 0,
+          privateSales: 0,
+          sharedExpenses: 0
+        };
       }
       dailyMap[exp.date].expenses += exp.amount;
+      if (exp.shared === true) {
+        dailyMap[exp.date].sharedExpenses += exp.amount;
+      }
     });
 
     return Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
@@ -346,6 +423,85 @@ export default function DashboardPage() {
               </Card>
             </div>
 
+            {/* Admin-only Detailed Breakdown Grid */}
+            {profile?.role === "admin" && (
+              <div className="space-y-2 mt-4">
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-sans">Admin Details (Shared vs Private)</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {/* Row 1: Shared Data */}
+                  <Card className="border-border shadow-sm bg-muted/10">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                      <CardTitle className="text-xs font-medium font-sans text-muted-foreground">Shared Sales</CardTitle>
+                      <TrendingUp className="h-4 w-4 text-green-500/70" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-lg font-bold font-sans">Ks {metrics.sharedSales.toLocaleString()}</div>
+                      <p className="text-[10px] text-muted-foreground font-sans font-normal">Visible to all users</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-border shadow-sm bg-muted/10">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                      <CardTitle className="text-xs font-medium font-sans text-muted-foreground">Shared Expenses</CardTitle>
+                      <Wallet className="h-4 w-4 text-red-500/70" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-lg font-bold font-sans">Ks {metrics.sharedExpenses.toLocaleString()}</div>
+                      <p className="text-[10px] text-muted-foreground font-sans font-normal">Visible to all users</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-border shadow-sm bg-muted/10">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                      <CardTitle className="text-xs font-medium font-sans text-muted-foreground">Shared Customers</CardTitle>
+                      <Users className="h-4 w-4 text-blue-500/70" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-lg font-bold font-sans">{metrics.sharedCustomerCount}</div>
+                      <p className="text-[10px] text-muted-foreground font-sans font-normal">Customers from shared transactions</p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Row 2: Private Data */}
+                  <Card className="border-border shadow-sm bg-muted/10">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                      <CardTitle className="text-xs font-medium font-sans text-muted-foreground">Private Sales (Only Me)</CardTitle>
+                      <TrendingUp className="h-4 w-4 text-green-600/50" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-lg font-bold font-sans">Ks {metrics.privateSales.toLocaleString()}</div>
+                      <p className="text-[10px] text-muted-foreground font-sans font-normal">Private to owner</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-border shadow-sm bg-muted/10">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                      <CardTitle className="text-xs font-medium font-sans text-muted-foreground">Private Expenses (Only Me)</CardTitle>
+                      <Wallet className="h-4 w-4 text-red-600/50" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-lg font-bold font-sans">Ks {metrics.privateExpenses.toLocaleString()}</div>
+                      <p className="text-[10px] text-muted-foreground font-sans font-normal">Private to owner</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-border shadow-sm bg-muted/10">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                      <CardTitle className="text-xs font-medium font-sans text-muted-foreground">Private Customers (Only Me)</CardTitle>
+                      <Users className="h-4 w-4 text-blue-600/50" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-lg font-bold font-sans">{metrics.privateCustomerCount}</div>
+                      <p className="text-[10px] text-muted-foreground font-sans font-normal">Customers from private transactions</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            )}
+
             {/* Chart and Top Selling Grid */}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               {/* Chart */}
@@ -362,9 +518,9 @@ export default function DashboardPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData}>
-                        <XAxis dataKey="date" stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
+                        <XAxis dataKey="date" stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatDateLabel} />
                         <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `Ks ${value.toLocaleString()}`} />
-                        <Tooltip contentStyle={{ background: "#FFFFFF", border: "1px solid #E2E8F0" }} />
+                        <Tooltip formatter={(value) => [`Ks ${Number(value).toLocaleString()}`]} labelFormatter={formatDateLabel} contentStyle={{ background: "#FFFFFF", border: "1px solid #E2E8F0" }} />
                         <Legend wrapperStyle={{ fontSize: 11 }} />
                         <Bar dataKey="sales" name="Sales" fill="#10B981" radius={[4, 4, 0, 0]} />
                         <Bar dataKey="expenses" name="Expenses" fill="#EF4444" radius={[4, 4, 0, 0]} />
@@ -408,6 +564,69 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Admin-only Detailed Analytics Charts */}
+            {profile?.role === "admin" && (
+              <div className="space-y-4 mt-6">
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-sans">Admin Analytics (Trends)</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                  {/* Shared Sale vs Private Sale Line Chart */}
+                  <Card className="border-border shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-md font-sans">Shared Sales vs Private Sales</CardTitle>
+                      <CardDescription className="text-xs font-sans">Daily breakdown of public vs private sales.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-[300px] pl-0">
+                      {chartData.length === 0 ? (
+                        <div className="flex h-full items-center justify-center text-muted-foreground text-sm font-sans">
+                          No data to chart.
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                            <XAxis dataKey="date" stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatDateLabel} />
+                            <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `Ks ${value.toLocaleString()}`} />
+                            <Tooltip formatter={(value) => [`Ks ${Number(value).toLocaleString()}`]} labelFormatter={formatDateLabel} contentStyle={{ background: "#FFFFFF", border: "1px solid #E2E8F0" }} />
+                            <Legend wrapperStyle={{ fontSize: 11 }} />
+                            <Line type="monotone" dataKey="sharedSales" name="Shared Sales" stroke="#10B981" strokeWidth={2} activeDot={{ r: 6 }} dot={{ r: 3 }} />
+                            <Line type="monotone" dataKey="privateSales" name="Private Sales" stroke="#F59E0B" strokeWidth={2} activeDot={{ r: 6 }} dot={{ r: 3 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Shared Sale vs Shared Expenses Line Chart */}
+                  <Card className="border-border shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-md font-sans">Shared Sales vs Shared Expenses</CardTitle>
+                      <CardDescription className="text-xs font-sans">Daily comparison of public sales against public expenditures.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-[300px] pl-0">
+                      {chartData.length === 0 ? (
+                        <div className="flex h-full items-center justify-center text-muted-foreground text-sm font-sans">
+                          No data to chart.
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                            <XAxis dataKey="date" stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatDateLabel} />
+                            <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `Ks ${value.toLocaleString()}`} />
+                            <Tooltip formatter={(value) => [`Ks ${Number(value).toLocaleString()}`]} labelFormatter={formatDateLabel} contentStyle={{ background: "#FFFFFF", border: "1px solid #E2E8F0" }} />
+                            <Legend wrapperStyle={{ fontSize: 11 }} />
+                            <Line type="monotone" dataKey="sharedSales" name="Shared Sales" stroke="#10B981" strokeWidth={2} activeDot={{ r: 6 }} dot={{ r: 3 }} />
+                            <Line type="monotone" dataKey="sharedExpenses" name="Shared Expenses" stroke="#EF4444" strokeWidth={2} activeDot={{ r: 6 }} dot={{ r: 3 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
