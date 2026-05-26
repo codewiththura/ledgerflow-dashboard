@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { 
   Users, 
   TrendingUp, 
-  DollarSign,
+  Coins,
   Calendar,
   Wallet
 } from "lucide-react";
@@ -307,7 +307,7 @@ export default function DashboardPage() {
                   <TrendingUp className="h-4 w-4 text-green-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold font-sans">${metrics.totalSales.toFixed(2)}</div>
+                  <div className="text-2xl font-bold font-sans">Ks {metrics.totalSales.toLocaleString()}</div>
                   <p className="text-xs text-muted-foreground font-sans">In selected period</p>
                 </CardContent>
               </Card>
@@ -318,7 +318,7 @@ export default function DashboardPage() {
                   <Wallet className="h-4 w-4 text-red-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold font-sans">${metrics.totalExpenses.toFixed(2)}</div>
+                  <div className="text-2xl font-bold font-sans">Ks {metrics.totalExpenses.toLocaleString()}</div>
                   <p className="text-xs text-muted-foreground font-sans font-normal">Operational spends</p>
                 </CardContent>
               </Card>
@@ -326,10 +326,10 @@ export default function DashboardPage() {
               <Card className="border-border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <CardTitle className="text-sm font-medium font-sans">Net Revenues</CardTitle>
-                  <DollarSign className={`h-4 w-4 ${metrics.revenues >= 0 ? "text-green-500" : "text-red-500"}`} />
+                  <Coins className={`h-4 w-4 ${metrics.revenues >= 0 ? "text-green-500" : "text-red-500"}`} />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold font-sans">${metrics.revenues.toFixed(2)}</div>
+                  <div className="text-2xl font-bold font-sans">Ks {metrics.revenues.toLocaleString()}</div>
                   <p className="text-xs text-muted-foreground font-sans">Sales minus spends</p>
                 </CardContent>
               </Card>
@@ -363,7 +363,7 @@ export default function DashboardPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData}>
                         <XAxis dataKey="date" stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
+                        <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `Ks ${value.toLocaleString()}`} />
                         <Tooltip contentStyle={{ background: "#FFFFFF", border: "1px solid #E2E8F0" }} />
                         <Legend wrapperStyle={{ fontSize: 11 }} />
                         <Bar dataKey="sales" name="Sales" fill="#10B981" radius={[4, 4, 0, 0]} />
@@ -399,7 +399,7 @@ export default function DashboardPage() {
                           <TableRow key={index}>
                             <TableCell className="font-medium max-w-[120px] truncate">{p.name}</TableCell>
                             <TableCell className="text-center font-sans">{p.quantity}</TableCell>
-                            <TableCell className="text-right font-bold font-sans">${p.revenue.toFixed(2)}</TableCell>
+                            <TableCell className="text-right font-bold font-sans">Ks {p.revenue.toLocaleString()}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

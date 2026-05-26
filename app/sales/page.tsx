@@ -1,16 +1,17 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  orderBy, 
-  doc, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  orderBy,
+  doc,
+  updateDoc,
   deleteDoc,
-  getDocs
+  getDocs,
+  onSnapshot
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/auth-context";
@@ -49,6 +50,9 @@ interface Sale {
   shared: boolean;
   createdBy: string;
   createdAt: string;
+  discountName?: string;
+  discountAmount?: number;
+  note?: string;
 }
 
 interface ProductCatalogItem {
@@ -60,18 +64,26 @@ interface ProductCatalogItem {
 export default function SalesPage() {
   const { profile } = useAuth();
   const [productsCatalog, setProductsCatalog] = useState<ProductCatalogItem[]>([]);
-  
+
   // Dialog Open states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
 
+  // Predefined Discounts states
+  const [predefinedDiscounts, setPredefinedDiscounts] = useState<{ id: string; name: string; value: number }[]>([]);
+  const [manageDiscountsOpen, setManageDiscountsOpen] = useState(false);
+  const [newDiscountName, setNewDiscountName] = useState("");
+  const [newDiscountValue, setNewDiscountValue] = useState("");
+  const [discountError, setDiscountError] = useState<string | null>(null);
+  const [savingDiscount, setSavingDiscount] = useState(false);
+
   // Custom delete confirm state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [saleIdToDelete, setSaleIdToDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  
+
   // Creation form fields
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
@@ -85,6 +97,11 @@ export default function SalesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Sale creation discount & note fields
+  const [discountType, setDiscountType] = useState("None");
+  const [discountAmount, setDiscountAmount] = useState("0");
+  const [note, setNote] = useState("");
+
   // Editing form fields
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
@@ -96,6 +113,71 @@ export default function SalesPage() {
   const [editSaleItems, setEditSaleItems] = useState<{ productId: string; price: string; quantity: string }[]>([]);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+
+  // Sale editing discount & note fields
+  const [editDiscountType, setEditDiscountType] = useState("None");
+  const [editDiscountAmount, setEditDiscountAmount] = useState("0");
+  const [editNote, setEditNote] = useState("");
+
+  // Predefined discounts real-time listener
+  useEffect(() => {
+    if (!profile) return;
+    const q = query(collection(db, "discounts"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: { id: string; name: string; value: number }[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          name: data.name,
+          value: data.value
+        });
+      });
+      setPredefinedDiscounts(list);
+    }, (err) => {
+      console.error("Discounts subscription error:", err);
+    });
+    return () => unsubscribe();
+  }, [profile]);
+
+  const handleAddDiscount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDiscountError(null);
+    const val = parseFloat(newDiscountValue);
+    if (!newDiscountName.trim()) {
+      setDiscountError("Discount name is required.");
+      return;
+    }
+    if (isNaN(val) || val <= 0) {
+      setDiscountError("Discount value must be a valid positive number.");
+      return;
+    }
+
+    setSavingDiscount(true);
+    try {
+      await addDoc(collection(db, "discounts"), {
+        name: newDiscountName.trim(),
+        value: val,
+        createdBy: profile?.uid || "",
+        createdAt: new Date().toISOString()
+      });
+      setNewDiscountName("");
+      setNewDiscountValue("");
+    } catch (err) {
+      console.error("Error creating discount:", err);
+      setDiscountError("Failed to save discount.");
+    } finally {
+      setSavingDiscount(false);
+    }
+  };
+
+  const handleDeleteDiscount = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "discounts", id));
+    } catch (err) {
+      console.error("Error deleting discount:", err);
+    }
+  };
 
   const createSalesQuery = React.useCallback(() => {
     if (!profile) return query(collection(db, "sales"), orderBy("date", "desc"));
@@ -158,10 +240,22 @@ export default function SalesPage() {
       const qtyVal = parseInt(item.quantity) || 0;
       subtotal += priceVal * qtyVal;
     });
-    return { subtotal, total: subtotal };
+
+    let discountVal = 0;
+    if (discountType === "Custom") {
+      discountVal = parseFloat(discountAmount) || 0;
+    } else if (discountType !== "None") {
+      const selected = predefinedDiscounts.find(d => d.id === discountType);
+      if (selected) {
+        discountVal = selected.value;
+      }
+    }
+
+    const total = Math.max(0, subtotal - discountVal);
+    return { subtotal, total, discountVal };
   };
 
-  const { subtotal: calculatedSubtotal, total: calculatedTotal } = calculateTotals();
+  const { subtotal: calculatedSubtotal, total: calculatedTotal, discountVal: activeDiscountVal } = calculateTotals();
 
   // Calculations for Edit Form
   const calculateEditTotals = () => {
@@ -171,10 +265,22 @@ export default function SalesPage() {
       const qtyVal = parseInt(item.quantity) || 0;
       subtotal += priceVal * qtyVal;
     });
-    return { subtotal, total: subtotal };
+
+    let discountVal = 0;
+    if (editDiscountType === "Custom") {
+      discountVal = parseFloat(editDiscountAmount) || 0;
+    } else if (editDiscountType !== "None") {
+      const selected = predefinedDiscounts.find(d => d.id === editDiscountType);
+      if (selected) {
+        discountVal = selected.value;
+      }
+    }
+
+    const total = Math.max(0, subtotal - discountVal);
+    return { subtotal, total, discountVal };
   };
 
-  const { subtotal: editCalculatedSubtotal, total: editCalculatedTotal } = calculateEditTotals();
+  const { subtotal: editCalculatedSubtotal, total: editCalculatedTotal, discountVal: editActiveDiscountVal } = calculateEditTotals();
 
   const handleProductSelect = (index: number, productId: string) => {
     const selectedProd = productsCatalog.find((p) => p.id === productId);
@@ -288,6 +394,20 @@ export default function SalesPage() {
       const isShared = profile?.role === "admin" ? (visibility === "Shared") : true;
       const { subtotal, total } = calculateTotals();
 
+      let finalDiscountName = "";
+      let finalDiscountAmount = 0;
+
+      if (discountType === "Custom") {
+        finalDiscountName = "Custom Discount";
+        finalDiscountAmount = parseFloat(discountAmount) || 0;
+      } else if (discountType !== "None") {
+        const selected = predefinedDiscounts.find(d => d.id === discountType);
+        if (selected) {
+          finalDiscountName = selected.name;
+          finalDiscountAmount = selected.value;
+        }
+      }
+
       await addDoc(collection(db, "sales"), {
         customerSocialName: customerName.trim(),
         customerEmail: customerEmail.trim(),
@@ -300,6 +420,9 @@ export default function SalesPage() {
         shared: isShared,
         createdBy: profile?.uid || "",
         createdAt: new Date().toISOString(),
+        discountName: finalDiscountName,
+        discountAmount: finalDiscountAmount,
+        note: note.trim()
       });
 
       // Reset form
@@ -310,6 +433,9 @@ export default function SalesPage() {
       setDate(new Date().toISOString().split("T")[0]);
       setSaleItems([{ productId: "", price: "", quantity: "1" }]);
       setVisibility("Shared");
+      setDiscountType("None");
+      setDiscountAmount("0");
+      setNote("");
       setCreateDialogOpen(false);
       await refresh();
     } catch (err) {
@@ -328,7 +454,26 @@ export default function SalesPage() {
     setEditTransactionMethod(sale.transactionMethod);
     setEditDate(sale.date);
     setEditVisibility(sale.shared ? "Shared" : "Only Me");
-    
+    setEditNote(sale.note || "");
+
+    // Set edit discount fields
+    if (!sale.discountAmount || sale.discountAmount === 0) {
+      setEditDiscountType("None");
+      setEditDiscountAmount("0");
+    } else if (sale.discountName === "Custom Discount") {
+      setEditDiscountType("Custom");
+      setEditDiscountAmount(sale.discountAmount.toString());
+    } else {
+      const matched = predefinedDiscounts.find(d => d.name === sale.discountName);
+      if (matched) {
+        setEditDiscountType(matched.id);
+        setEditDiscountAmount(matched.value.toString());
+      } else {
+        setEditDiscountType("Custom");
+        setEditDiscountAmount(sale.discountAmount.toString());
+      }
+    }
+
     // Map existing products in sale to form item states
     const items = sale.products.map(p => ({
       productId: p.productId,
@@ -388,6 +533,21 @@ export default function SalesPage() {
     setUpdating(true);
     try {
       const { subtotal, total } = calculateEditTotals();
+
+      let finalDiscountName = "";
+      let finalDiscountAmount = 0;
+
+      if (editDiscountType === "Custom") {
+        finalDiscountName = "Custom Discount";
+        finalDiscountAmount = parseFloat(editDiscountAmount) || 0;
+      } else if (editDiscountType !== "None") {
+        const selected = predefinedDiscounts.find(d => d.id === editDiscountType);
+        if (selected) {
+          finalDiscountName = selected.name;
+          finalDiscountAmount = selected.value;
+        }
+      }
+
       const updatedFields: {
         customerSocialName: string;
         customerEmail: string;
@@ -398,6 +558,9 @@ export default function SalesPage() {
         subtotal: number;
         total: number;
         shared?: boolean;
+        discountName: string;
+        discountAmount: number;
+        note: string;
       } = {
         customerSocialName: editCustomerName.trim(),
         customerEmail: editCustomerEmail.trim(),
@@ -407,6 +570,9 @@ export default function SalesPage() {
         products: preparedProducts,
         subtotal,
         total,
+        discountName: finalDiscountName,
+        discountAmount: finalDiscountAmount,
+        note: editNote.trim()
       };
 
       if (profile?.role === "admin") {
@@ -474,218 +640,361 @@ export default function SalesPage() {
             </p>
           </div>
 
-          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Add Sale
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Add New Sale</DialogTitle>
-                <DialogDescription>
-                  Create a new customer sale record.
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleCreateSale} className="space-y-4 py-4">
-                {formError && (
-                  <Alert variant="destructive">
-                    <AlertTitle>Error</AlertTitle>
-                    <AlertDescription>{formError}</AlertDescription>
-                  </Alert>
-                )}
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <RequiredLabel htmlFor="customerName">Customer Social Name</RequiredLabel>
-                    <Input
-                      id="customerName"
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder="E.g. John Doe Facebook"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <RequiredLabel htmlFor="customerEmail" required>Customer Email</RequiredLabel>
-                    <Input
-                      id="customerEmail"
-                      type="email"
-                      value={customerEmail}
-                      onChange={(e) => setCustomerEmail(e.target.value)}
-                      placeholder="john.doe@example.com"
-                      required
-                    />
+          <div className="flex items-center gap-2">
+            <Dialog open={manageDiscountsOpen} onOpenChange={setManageDiscountsOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="flex items-center gap-2">
+                  Manage Discounts
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[450px]">
+                <DialogHeader>
+                  <DialogTitle>Manage Predefined Discounts</DialogTitle>
+                  <DialogDescription>
+                    Add or delete predefined discounts.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4 font-sans text-sm">
+                  {discountError && (
+                    <Alert variant="destructive">
+                      <AlertTitle>Error</AlertTitle>
+                      <AlertDescription>{discountError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <form onSubmit={handleAddDiscount} className="flex gap-2 items-end">
+                    <div className="flex-1 space-y-1">
+                      <RequiredLabel htmlFor="newDiscountName" required>Name</RequiredLabel>
+                      <Input
+                        id="newDiscountName"
+                        value={newDiscountName}
+                        onChange={(e) => setNewDiscountName(e.target.value)}
+                        placeholder="E.g. Bundle Discount"
+                        required
+                      />
+                    </div>
+                    <div className="w-28 space-y-1">
+                      <RequiredLabel htmlFor="newDiscountValue" required>Value (Ks)</RequiredLabel>
+                      <Input
+                        id="newDiscountValue"
+                        type="number"
+                        min="1"
+                        value={newDiscountValue}
+                        onChange={(e) => setNewDiscountValue(e.target.value)}
+                        placeholder="9000"
+                        required
+                      />
+                    </div>
+                    <Button type="submit" disabled={savingDiscount} className="h-9 px-3">
+                      Add
+                    </Button>
+                  </form>
+
+                  <div className="border-t border-border pt-4">
+                    <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider block mb-2">Discounts List</span>
+                    {predefinedDiscounts.length === 0 ? (
+                      <div className="text-xs text-muted-foreground py-2 italic text-center">
+                        No predefined discounts created.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                        {predefinedDiscounts.map((d) => (
+                          <div key={d.id} className="flex justify-between items-center bg-muted/40 p-2 rounded border border-border">
+                            <div>
+                              <span className="font-medium">{d.name}</span>
+                              <span className="text-xs text-muted-foreground ml-2">({d.value.toLocaleString()} Ks)</span>
+                            </div>
+                            <Button
+                              onClick={() => handleDeleteDiscount(d.id)}
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
+                <DialogFooter>
+                  <Button onClick={() => setManageDiscountsOpen(false)}>Done</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <RequiredLabel htmlFor="transactionName" required>Transaction Name</RequiredLabel>
-                    <Input
-                      id="transactionName"
-                      value={transactionName}
-                      onChange={(e) => setTransactionName(e.target.value)}
-                      placeholder="E.g. Invoice 12456"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <RequiredLabel htmlFor="method" required>Transaction Method</RequiredLabel>
-                    <Select
-                      value={transactionMethod}
-                      onValueChange={(val: "Kpay" | "Aya") => setTransactionMethod(val)}
-                    >
-                      <SelectTrigger id="method">
-                        <SelectValue placeholder="Select Method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Kpay">Kpay</SelectItem>
-                        <SelectItem value="Aya">Aya</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+            <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="flex items-center gap-2">
+                  <Plus className="h-4 w-4" /> Add Sale
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Add New Sale</DialogTitle>
+                  <DialogDescription>
+                    Create a new customer sale record.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleCreateSale} className="space-y-4 py-4">
+                  {formError && (
+                    <Alert variant="destructive">
+                      <AlertTitle>Error</AlertTitle>
+                      <AlertDescription>{formError}</AlertDescription>
+                    </Alert>
+                  )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <RequiredLabel htmlFor="date" required>Date</RequiredLabel>
-                    <Input
-                      id="date"
-                      type="date"
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                      required
-                    />
-                  </div>
-                  {profile?.role === "admin" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <RequiredLabel htmlFor="visibility" required>Visibility</RequiredLabel>
+                      <RequiredLabel htmlFor="customerName">Customer Social Name</RequiredLabel>
+                      <Input
+                        id="customerName"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="E.g. John Doe Facebook"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="customerEmail" required>Customer Email</RequiredLabel>
+                      <Input
+                        id="customerEmail"
+                        type="email"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
+                        placeholder="john.doe@example.com"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="transactionName" required>Transaction Name</RequiredLabel>
+                      <Input
+                        id="transactionName"
+                        value={transactionName}
+                        onChange={(e) => setTransactionName(e.target.value)}
+                        placeholder="E.g. Invoice 12456"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="method" required>Transaction Method</RequiredLabel>
                       <Select
-                        value={visibility}
-                        onValueChange={(val: "Shared" | "Only Me") => setVisibility(val)}
+                        value={transactionMethod}
+                        onValueChange={(val: "Kpay" | "Aya") => setTransactionMethod(val)}
                       >
-                        <SelectTrigger id="visibility">
-                          <SelectValue placeholder="Select visibility" />
+                        <SelectTrigger id="method">
+                          <SelectValue placeholder="Select Method" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Shared">Shared</SelectItem>
-                          <SelectItem value="Only Me">Only Me</SelectItem>
+                          <SelectItem value="Kpay">Kpay</SelectItem>
+                          <SelectItem value="Aya">Aya</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
-                  )}
-                </div>
-
-                <div className="space-y-4 border-t border-border pt-4">
-                  <div className="flex justify-between items-center">
-                    <RequiredLabel required>Products Sold</RequiredLabel>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAddItemRow}
-                      className="text-xs h-7 px-2"
-                      disabled={productsCatalog.length === 0}
-                    >
-                      <Plus className="h-3 w-3 mr-1" /> Add Product
-                    </Button>
                   </div>
 
-                  {productsCatalog.length === 0 ? (
-                    <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
-                      No approved products exist. Please add products and approve them first.
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="date" required>Date</RequiredLabel>
+                      <Input
+                        id="date"
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        required
+                      />
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {saleItems.map((item, idx) => (
-                        <div key={idx} className="flex flex-col sm:flex-row gap-2 items-start sm:items-end border-b border-border pb-3 sm:border-none sm:pb-0">
-                          <div className="flex-1 w-full space-y-1 sm:space-y-0">
-                            <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Product</RequiredLabel>
-                            <Select
-                              value={item.productId}
-                              onValueChange={(val) => handleProductSelect(idx, val)}
+                    {profile?.role === "admin" && (
+                      <div className="space-y-2">
+                        <RequiredLabel htmlFor="visibility" required>Visibility</RequiredLabel>
+                        <Select
+                          value={visibility}
+                          onValueChange={(val: "Shared" | "Only Me") => setVisibility(val)}
+                        >
+                          <SelectTrigger id="visibility">
+                            <SelectValue placeholder="Select visibility" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Shared">Shared</SelectItem>
+                            <SelectItem value="Only Me">Only Me</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-border pt-4">
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="discountType">Discount Type</RequiredLabel>
+                      <Select
+                        value={discountType}
+                        onValueChange={(val) => {
+                          setDiscountType(val);
+                          if (val === "None") {
+                            setDiscountAmount("0");
+                          } else if (val !== "Custom") {
+                            const selected = predefinedDiscounts.find(d => d.id === val);
+                            if (selected) {
+                              setDiscountAmount(selected.value.toString());
+                            }
+                          }
+                        }}
+                      >
+                        <SelectTrigger id="discountType">
+                          <SelectValue placeholder="No Discount" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="None">No Discount</SelectItem>
+                          <SelectItem value="Custom">Custom Discount</SelectItem>
+                          {predefinedDiscounts.map((d) => (
+                            <SelectItem key={d.id} value={d.id}>
+                              {d.name} (Ks {d.value.toLocaleString()})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="discountAmount">Discount Amount (Ks)</RequiredLabel>
+                      <Input
+                        id="discountAmount"
+                        type="number"
+                        min="0"
+                        value={discountAmount}
+                        onChange={(e) => setDiscountAmount(e.target.value)}
+                        disabled={discountType === "None" || discountType !== "Custom"}
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <RequiredLabel htmlFor="note">Transaction Note (Optional)</RequiredLabel>
+                    <Input
+                      id="note"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="E.g. Special request or customer contact details"
+                    />
+                  </div>
+
+                  <div className="space-y-4 border-t border-border pt-4">
+                    <div className="flex justify-between items-center">
+                      <RequiredLabel required>Products Sold</RequiredLabel>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAddItemRow}
+                        className="text-xs h-7 px-2"
+                        disabled={productsCatalog.length === 0}
+                      >
+                        <Plus className="h-3 w-3 mr-1" /> Add Product
+                      </Button>
+                    </div>
+
+                    {productsCatalog.length === 0 ? (
+                      <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
+                        No approved products exist. Please add products and approve them first.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {saleItems.map((item, idx) => (
+                          <div key={idx} className="flex flex-col sm:flex-row gap-2 items-start sm:items-end border-b border-border pb-3 sm:border-none sm:pb-0">
+                            <div className="flex-1 w-full space-y-1 sm:space-y-0">
+                              <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Product</RequiredLabel>
+                              <Select
+                                value={item.productId}
+                                onValueChange={(val) => handleProductSelect(idx, val)}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Select Product" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {productsCatalog.map((prod) => (
+                                    <SelectItem key={prod.id} value={prod.id}>
+                                      {prod.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="w-full sm:w-40 flex flex-row gap-2">
+                              <div className="space-y-1 sm:space-y-0">
+                                <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Price</RequiredLabel>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  placeholder="0.00"
+                                  value={item.price}
+                                  onChange={(e) => handleItemChange(idx, "price", e.target.value)}
+                                  className="w-full text-right"
+                                />
+                              </div>
+                              <div className="space-y-1 sm:space-y-0">
+                                <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Qty</RequiredLabel>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  placeholder="1"
+                                  value={item.quantity}
+                                  onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
+                                  className="w-full sm:w-14 text-right"
+                                />
+                              </div>
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemoveItemRow(idx)}
+                              className="text-destructive h-9 w-9 self-end"
+                              disabled={saleItems.length === 1}
                             >
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select Product" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {productsCatalog.map((prod) => (
-                                  <SelectItem key={prod.id} value={prod.id}>
-                                    {prod.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
-                          
-                          <div className="w-full sm:w-24 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
-                            <div className="space-y-1 sm:space-y-0">
-                              <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Price</RequiredLabel>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                placeholder="0.00"
-                                value={item.price}
-                                onChange={(e) => handleItemChange(idx, "price", e.target.value)}
-                                className="w-full text-right"
-                              />
-                            </div>
-                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
-                          <div className="w-full sm:w-20 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
-                            <div className="space-y-1 sm:space-y-0">
-                              <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Qty</RequiredLabel>
-                              <Input
-                                type="number"
-                                min="1"
-                                placeholder="1"
-                                value={item.quantity}
-                                onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
-                                className="w-full text-right"
-                              />
-                            </div>
-                          </div>
-
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleRemoveItemRow(idx)}
-                            className="text-destructive h-9 w-9 self-end"
-                            disabled={saleItems.length === 1}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
+                  <div className="flex flex-col items-end border-t border-border pt-4 text-sm font-sans space-y-1">
+                    <div className="flex gap-4">
+                      <span className="text-muted-foreground">Subtotal:</span>
+                      <span className="font-bold">Ks {calculatedSubtotal.toLocaleString()}</span>
                     </div>
-                  )}
-                </div>
-
-                <div className="flex flex-col items-end border-t border-border pt-4 text-sm font-sans space-y-1">
-                  <div className="flex gap-4">
-                    <span className="text-muted-foreground">Subtotal:</span>
-                    <span className="font-bold">${calculatedSubtotal.toFixed(2)}</span>
+                    {activeDiscountVal > 0 && (
+                      <div className="flex gap-4 text-red-600 text-xs">
+                        <span>Discount:</span>
+                        <span>-Ks {activeDiscountVal.toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div className="flex gap-4 text-base font-bold">
+                      <span className="text-foreground">Total:</span>
+                      <span className="text-primary">Ks {calculatedTotal.toLocaleString()}</span>
+                    </div>
                   </div>
-                  <div className="flex gap-4 text-base font-bold">
-                    <span className="text-foreground">Total:</span>
-                    <span className="text-primary">${calculatedTotal.toFixed(2)}</span>
-                  </div>
-                </div>
 
-                <DialogFooter className="pt-4 gap-2">
-                  <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={submitting || productsCatalog.length === 0}>
-                    {submitting ? "Saving..." : "Save Sale"}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+                  <DialogFooter className="pt-4 gap-2">
+                    <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={submitting || productsCatalog.length === 0}>
+                      {submitting ? "Saving..." : "Save Sale"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
-
         <Card className="border border-border shadow-sm">
           <CardHeader className="p-4 sm:p-6 border-b border-border">
             <CardTitle className="text-md font-bold font-sans">Sales Log</CardTitle>
@@ -731,7 +1040,12 @@ export default function SalesPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-bold font-sans">
-                        ${sale.total.toFixed(2)}
+                        Ks {sale.total.toLocaleString()}
+                        {sale.discountAmount ? (
+                          <div className="text-[10px] text-red-600 font-normal">
+                            (Ks {sale.discountAmount.toLocaleString()} discount)
+                          </div>
+                        ) : null}
                       </TableCell>
                       {profile?.role === "admin" && (
                         <TableCell className="text-center">
@@ -822,7 +1136,7 @@ export default function SalesPage() {
                   <AlertDescription>{editFormError}</AlertDescription>
                 </Alert>
               )}
-              
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <RequiredLabel htmlFor="editCustomerName">Customer Social Name</RequiredLabel>
@@ -904,6 +1218,62 @@ export default function SalesPage() {
                 )}
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-border pt-4">
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editDiscountType">Discount Type</RequiredLabel>
+                  <Select
+                    value={editDiscountType}
+                    onValueChange={(val) => {
+                      setEditDiscountType(val);
+                      if (val === "None") {
+                        setEditDiscountAmount("0");
+                      } else if (val !== "Custom") {
+                        const selected = predefinedDiscounts.find(d => d.id === val);
+                        if (selected) {
+                          setEditDiscountAmount(selected.value.toString());
+                        }
+                      }
+                    }}
+                  >
+                    <SelectTrigger id="editDiscountType">
+                      <SelectValue placeholder="No Discount" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="None">No Discount</SelectItem>
+                      <SelectItem value="Custom">Custom Discount</SelectItem>
+                      {predefinedDiscounts.map((d) => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.name} (Ks {d.value.toLocaleString()})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editDiscountAmount">Discount Amount (Ks)</RequiredLabel>
+                  <Input
+                    id="editDiscountAmount"
+                    type="number"
+                    min="0"
+                    value={editDiscountAmount}
+                    onChange={(e) => setEditDiscountAmount(e.target.value)}
+                    disabled={editDiscountType === "None" || editDiscountType !== "Custom"}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="editNote">Transaction Note (Optional)</RequiredLabel>
+                <Input
+                  id="editNote"
+                  value={editNote}
+                  onChange={(e) => setEditNote(e.target.value)}
+                  placeholder="E.g. Special request or customer contact details"
+                />
+              </div>
+
               <div className="space-y-4 border-t border-border pt-4">
                 <div className="flex justify-between items-center">
                   <RequiredLabel required>Products Sold</RequiredLabel>
@@ -945,8 +1315,8 @@ export default function SalesPage() {
                             </SelectContent>
                           </Select>
                         </div>
-                        
-                        <div className="w-full sm:w-24 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
+
+                        <div className="w-full sm:w-40 flex flex-row gap-2">
                           <div className="space-y-1 sm:space-y-0">
                             <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Price</RequiredLabel>
                             <Input
@@ -958,9 +1328,6 @@ export default function SalesPage() {
                               className="w-full text-right"
                             />
                           </div>
-                        </div>
-
-                        <div className="w-full sm:w-20 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
                           <div className="space-y-1 sm:space-y-0">
                             <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Qty</RequiredLabel>
                             <Input
@@ -969,7 +1336,7 @@ export default function SalesPage() {
                               placeholder="1"
                               value={item.quantity}
                               onChange={(e) => handleEditItemChange(idx, "quantity", e.target.value)}
-                              className="w-full text-right"
+                              className="w-full sm:w-14 text-right"
                             />
                           </div>
                         </div>
@@ -993,11 +1360,17 @@ export default function SalesPage() {
               <div className="flex flex-col items-end border-t border-border pt-4 text-sm font-sans space-y-1">
                 <div className="flex gap-4">
                   <span className="text-muted-foreground">Subtotal:</span>
-                  <span className="font-bold">${editCalculatedSubtotal.toFixed(2)}</span>
+                  <span className="font-bold">Ks {editCalculatedSubtotal.toLocaleString()}</span>
                 </div>
+                {editActiveDiscountVal > 0 && (
+                  <div className="flex gap-4 text-red-600 text-xs">
+                    <span>Discount:</span>
+                    <span>-Ks {editActiveDiscountVal.toLocaleString()}</span>
+                  </div>
+                )}
                 <div className="flex gap-4 text-base font-bold">
                   <span className="text-foreground">Total:</span>
-                  <span className="text-primary">${editCalculatedTotal.toFixed(2)}</span>
+                  <span className="text-primary">Ks {editCalculatedTotal.toLocaleString()}</span>
                 </div>
               </div>
 
@@ -1023,22 +1396,22 @@ export default function SalesPage() {
               Full breakdown for {selectedSale?.customerSocialName || "No Name"}
             </DialogDescription>
           </DialogHeader>
-          
+
           {selectedSale && (
             <div className="space-y-4 py-4 font-sans text-sm">
               <div className="grid grid-cols-2 gap-y-2 border-b border-border pb-3">
                 <span className="text-muted-foreground">Date:</span>
                 <span className="text-right font-medium">{selectedSale.date}</span>
-                
+
                 <span className="text-muted-foreground">Customer:</span>
                 <span className="text-right font-medium">{selectedSale.customerSocialName || "-"}</span>
-                
+
                 <span className="text-muted-foreground">Customer Email:</span>
                 <span className="text-right font-medium">{selectedSale.customerEmail}</span>
 
                 <span className="text-muted-foreground">Transaction Name:</span>
                 <span className="text-right font-medium">{selectedSale.transactionName}</span>
-                
+
                 <span className="text-muted-foreground">Method:</span>
                 <span className="text-right font-medium">{selectedSale.transactionMethod}</span>
               </div>
@@ -1050,9 +1423,9 @@ export default function SalesPage() {
                     <div key={idx} className="flex justify-between items-center bg-muted/30 p-2 rounded border border-border">
                       <div className="flex flex-col">
                         <span className="font-medium text-xs sm:text-sm">{p.name}</span>
-                        <span className="text-xs text-muted-foreground">Qty: {p.quantity} @ ${p.price.toFixed(2)}</span>
+                        <span className="text-xs text-muted-foreground">Qty: {p.quantity} @ Ks {p.price.toLocaleString()}</span>
                       </div>
-                      <span className="font-bold text-xs sm:text-sm">${(p.price * p.quantity).toFixed(2)}</span>
+                      <span className="font-bold text-xs sm:text-sm">Ks {(p.price * p.quantity).toLocaleString()}</span>
                     </div>
                   ))}
                 </div>
@@ -1061,16 +1434,27 @@ export default function SalesPage() {
               <div className="flex flex-col items-end border-t border-border pt-4 space-y-1">
                 <div className="flex gap-4">
                   <span className="text-muted-foreground">Subtotal:</span>
-                  <span className="font-bold">${selectedSale.subtotal.toFixed(2)}</span>
+                  <span className="font-bold">Ks {selectedSale.subtotal.toLocaleString()}</span>
                 </div>
+                {selectedSale.discountAmount ? (
+                  <div className="flex gap-4 text-red-600 text-xs">
+                    <span>Discount ({selectedSale.discountName || "Applied"}):</span>
+                    <span>-Ks {selectedSale.discountAmount.toLocaleString()}</span>
+                  </div>
+                ) : null}
+                {selectedSale.note ? (
+                  <div className="text-xs text-muted-foreground max-w-full italic mt-2 self-start">
+                    Note: {selectedSale.note}
+                  </div>
+                ) : null}
                 <div className="flex gap-4 text-base font-bold">
                   <span className="text-foreground">Total:</span>
-                  <span className="text-primary">${selectedSale.total.toFixed(2)}</span>
+                  <span className="text-primary">Ks {selectedSale.total.toLocaleString()}</span>
                 </div>
               </div>
             </div>
           )}
-          
+
           <DialogFooter>
             <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
           </DialogFooter>

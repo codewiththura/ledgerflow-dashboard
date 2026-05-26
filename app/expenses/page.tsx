@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { 
   collection, 
   addDoc, 
@@ -382,7 +382,7 @@ export default function ExpensesPage() {
                       <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate">
                         {expense.note || "-"}
                       </TableCell>
-                      <TableCell className="text-right">${expense.amount.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">Ks {expense.amount.toLocaleString()}</TableCell>
                       {profile?.role === "admin" && (
                         <TableCell className="text-center">
                           <button

@@ -1,6 +1,7 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, DependencyList } from "react";
 import {
   Query,
   getDocs,
@@ -29,7 +30,7 @@ interface UsePaginationResult<T> {
 export function useFirestorePagination<T>(
   createQuery: () => Query,
   pageSizeDefault: number = 10,
-  deps: any[] = [],
+  deps: DependencyList = [],
   enabled: boolean = true
 ): UsePaginationResult<T> {
   const [items, setItems] = useState<T[]>([]);

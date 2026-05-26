@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { 
   collection, 
   addDoc, 
@@ -304,7 +304,7 @@ export default function ProductsPage() {
                           {product.category}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">${product.price.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">Ks {product.price.toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button
