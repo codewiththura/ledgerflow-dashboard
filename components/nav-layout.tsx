@@ -12,7 +12,8 @@ import {
   Users,
   LogOut,
   Menu,
-  X
+  X,
+  WifiOff
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -20,6 +21,26 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
   const { profile, logout } = useAuth();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+
+  React.useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    // Initial check deferred asynchronously to avoid synchronous setState inside effect body
+    const initialOnlineState = navigator.onLine;
+    Promise.resolve().then(() => {
+      setIsOnline(initialOnlineState);
+    });
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -71,6 +92,12 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
           })}
         </div>
         <div className="p-4 border-t border-border bg-muted/20">
+          {!isOnline && (
+            <div className="mb-4 flex items-center gap-2 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-amber-500 animate-pulse">
+              <WifiOff className="h-4 w-4 shrink-0" />
+              <span className="text-xs font-semibold font-sans">Offline Mode</span>
+            </div>
+          )}
           <div className="flex flex-col mb-4">
             <span className="text-xs text-muted-foreground truncate font-sans">
               {profile?.email}
@@ -103,6 +130,12 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
             <h1 className="text-lg font-semibold md:text-xl font-sans capitalize">
               {navigation.find((item) => isActive(item.href))?.name || "App"}
             </h1>
+            {!isOnline && (
+              <span className="flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/25 px-2 py-0.5 text-[10px] md:text-xs font-bold text-amber-500 animate-pulse ml-2">
+                <WifiOff className="h-3.5 w-3.5 shrink-0" />
+                Offline
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <div className="hidden md:flex flex-col text-right">
@@ -166,6 +199,12 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
           })}
         </div>
         <div className="p-4 border-t border-border bg-muted/20">
+          {!isOnline && (
+            <div className="mb-4 flex items-center gap-2 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-amber-500 animate-pulse">
+              <WifiOff className="h-4 w-4 shrink-0" />
+              <span className="text-xs font-semibold font-sans">Offline Mode</span>
+            </div>
+          )}
           <div className="flex flex-col mb-4">
             <span className="text-xs text-muted-foreground truncate font-sans">
               {profile?.email}

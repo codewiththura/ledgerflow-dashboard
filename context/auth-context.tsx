@@ -48,23 +48,57 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserProfile = async (uid: string): Promise<UserProfile | null> => {
-    try {
-      const userDocRef = doc(db, "users", uid);
-      const userDoc = await getDoc(userDocRef);
-      if (userDoc.exists()) {
-        return userDoc.data() as UserProfile;
+  // Load profile from localStorage on client mount to avoid hydration mismatch
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("ledgerflow_profile");
+        if (cached) {
+          const parsedProfile = JSON.parse(cached);
+          Promise.resolve().then(() => {
+            setProfile(parsedProfile);
+          });
+        }
+      } catch (e) {
+        console.error("Failed to load profile from localStorage:", e);
       }
-    } catch (error) {
-      console.error("Error fetching user profile:", error);
+    }
+  }, []);
+
+  const saveProfile = (newProfile: UserProfile | null) => {
+    setProfile(newProfile);
+    if (typeof window !== "undefined") {
+      try {
+        if (newProfile) {
+          localStorage.setItem("ledgerflow_profile", JSON.stringify(newProfile));
+        } else {
+          localStorage.removeItem("ledgerflow_profile");
+        }
+      } catch (e) {
+        console.error("Error saving profile to localStorage:", e);
+      }
+    }
+  };
+
+  const fetchUserProfile = async (uid: string): Promise<UserProfile | null> => {
+    const userDocRef = doc(db, "users", uid);
+    const userDoc = await getDoc(userDocRef);
+    if (userDoc.exists()) {
+      return userDoc.data() as UserProfile;
     }
     return null;
   };
 
   const refreshProfile = async () => {
     if (user) {
-      const updatedProfile = await fetchUserProfile(user.uid);
-      setProfile(updatedProfile);
+      try {
+        const updatedProfile = await fetchUserProfile(user.uid);
+        if (updatedProfile) {
+          saveProfile(updatedProfile);
+        }
+      } catch (e) {
+        console.error("Error refreshing user profile:", e);
+      }
     }
   };
 
@@ -72,42 +106,65 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
-        let userProfile = await fetchUserProfile(firebaseUser.uid);
-        
-        // If user document does not exist yet (e.g. signup in progress or manual database mismatch),
-        // we wait for it to be created, or try to fallback.
-        if (!userProfile) {
-          // Let's check if they are the first user to bootstrap admin
+        // 1. Try to load from localStorage first for instant transition
+        let cachedProfile: UserProfile | null = null;
+        if (typeof window !== "undefined") {
           try {
-            const usersRef = collection(db, "users");
-            const q = query(usersRef, limit(1));
-            const querySnapshot = await getDocs(q);
-            const isFirstUser = querySnapshot.empty;
-
-            const newProfile: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || "",
-              role: isFirstUser ? "admin" : "moderator",
-              approved: isFirstUser, // Auto-approve first user
-              createdAt: new Date().toISOString(),
-            };
-
-            await setDoc(doc(db, "users", firebaseUser.uid), newProfile);
-            userProfile = newProfile;
+            const cached = localStorage.getItem("ledgerflow_profile");
+            if (cached) {
+              const parsed = JSON.parse(cached) as UserProfile;
+              if (parsed.uid === firebaseUser.uid) {
+                cachedProfile = parsed;
+                setProfile(parsed);
+              }
+            }
           } catch (e) {
-            console.error("Error bootstrapping user:", e);
+            console.error("Error reading cached profile:", e);
           }
         }
-        
-        setProfile(userProfile);
+
+        // Set loading to false early if we already have the cached profile!
+        if (cachedProfile) {
+          setLoading(false);
+        }
+
+        // 2. Fetch fresh user profile from firestore (falls back to cache if offline)
+        try {
+          const userProfile = await fetchUserProfile(firebaseUser.uid);
+          if (userProfile) {
+            saveProfile(userProfile);
+          } else {
+            // Document doesn't exist. If we don't have a cached profile, bootstrap it.
+            if (!cachedProfile) {
+              const usersRef = collection(db, "users");
+              const q = query(usersRef, limit(1));
+              const querySnapshot = await getDocs(q);
+              const isFirstUser = querySnapshot.empty;
+
+              const newProfile: UserProfile = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email || "",
+                role: isFirstUser ? "admin" : "moderator",
+                approved: isFirstUser, // Auto-approve first user
+                createdAt: new Date().toISOString(),
+              };
+
+              await setDoc(doc(db, "users", firebaseUser.uid), newProfile);
+              saveProfile(newProfile);
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching user profile from database:", error);
+          // If offline or network error and we already have a cached profile, we do not clear it.
+        }
       } else {
-        setProfile(null);
+        saveProfile(null);
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
@@ -119,9 +176,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const logout = async () => {
     setLoading(true);
-    await firebaseSignOut(auth);
+    try {
+      await firebaseSignOut(auth);
+    } catch (e) {
+      console.error("Error signing out:", e);
+    }
     setUser(null);
-    setProfile(null);
+    saveProfile(null);
     setLoading(false);
   };
 
