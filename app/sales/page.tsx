@@ -24,7 +24,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Check, Plus, Trash2, Eye, Edit } from "lucide-react";
+import { Plus, Trash2, Eye, Edit } from "lucide-react";
 import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -45,7 +45,7 @@ interface Sale {
   products: ProductItem[];
   subtotal: number;
   total: number;
-  approved: boolean;
+  shared: boolean;
   createdBy: string;
   createdAt: string;
 }
@@ -79,6 +79,7 @@ export default function SalesPage() {
   const [transactionName, setTransactionName] = useState("");
   const [transactionMethod, setTransactionMethod] = useState<"Kpay" | "Aya">("Kpay");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [visibility, setVisibility] = useState<"Shared" | "Only Me">("Shared");
   const [saleItems, setSaleItems] = useState<{ productId: string; price: string; quantity: string }[]>([
     { productId: "", price: "", quantity: "1" }
   ]);
@@ -92,6 +93,7 @@ export default function SalesPage() {
   const [editTransactionName, setEditTransactionName] = useState("");
   const [editTransactionMethod, setEditTransactionMethod] = useState<"Kpay" | "Aya">("Kpay");
   const [editDate, setEditDate] = useState("");
+  const [editVisibility, setEditVisibility] = useState<"Shared" | "Only Me">("Shared");
   const [editSaleItems, setEditSaleItems] = useState<{ productId: string; price: string; quantity: string }[]>([]);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -104,9 +106,10 @@ export default function SalesPage() {
     if (profile.role === "admin") {
       salesQuery = query(collection(db, "sales"), orderBy("date", "desc"));
     } else {
+      // Moderators can only see records shared by admin
       salesQuery = query(
         collection(db, "sales"), 
-        where("approved", "==", true),
+        where("shared", "==", true),
         orderBy("date", "desc")
       );
     }
@@ -125,7 +128,7 @@ export default function SalesPage() {
           products: data.products || [],
           subtotal: data.subtotal || 0,
           total: data.total || 0,
-          approved: data.approved,
+          shared: data.shared ?? false,
           createdBy: data.createdBy,
           createdAt: data.createdAt
         } as Sale);
@@ -143,7 +146,7 @@ export default function SalesPage() {
   useEffect(() => {
     const fetchProductsCatalog = async () => {
       try {
-        const q = query(collection(db, "products"), where("approved", "==", true));
+        const q = query(collection(db, "products"), orderBy("name", "asc"));
         const snap = await getDocs(q);
         const list: ProductCatalogItem[] = [];
         snap.forEach((doc) => {
@@ -296,7 +299,7 @@ export default function SalesPage() {
 
     setSubmitting(true);
     try {
-      const isApproved = profile?.role === "admin";
+      const isShared = profile?.role === "admin" ? (visibility === "Shared") : true;
       const { subtotal, total } = calculateTotals();
 
       await addDoc(collection(db, "sales"), {
@@ -308,7 +311,7 @@ export default function SalesPage() {
         products: preparedProducts,
         subtotal,
         total,
-        approved: isApproved,
+        shared: isShared,
         createdBy: profile?.uid || "",
         createdAt: new Date().toISOString(),
       });
@@ -320,6 +323,7 @@ export default function SalesPage() {
       setTransactionMethod("Kpay");
       setDate(new Date().toISOString().split("T")[0]);
       setSaleItems([{ productId: "", price: "", quantity: "1" }]);
+      setVisibility("Shared");
       setCreateDialogOpen(false);
     } catch (err) {
       console.error("Error creating sale record:", err);
@@ -336,6 +340,7 @@ export default function SalesPage() {
     setEditTransactionName(sale.transactionName);
     setEditTransactionMethod(sale.transactionMethod);
     setEditDate(sale.date);
+    setEditVisibility(sale.shared ? "Shared" : "Only Me");
     
     // Map existing products in sale to form item states
     const items = sale.products.map(p => ({
@@ -396,7 +401,17 @@ export default function SalesPage() {
     setUpdating(true);
     try {
       const { subtotal, total } = calculateEditTotals();
-      await updateDoc(doc(db, "sales", editingSale.id), {
+      const updatedFields: {
+        customerSocialName: string;
+        customerEmail: string;
+        transactionName: string;
+        transactionMethod: "Kpay" | "Aya";
+        date: string;
+        products: ProductItem[];
+        subtotal: number;
+        total: number;
+        shared?: boolean;
+      } = {
         customerSocialName: editCustomerName.trim(),
         customerEmail: editCustomerEmail.trim(),
         transactionName: editTransactionName.trim(),
@@ -405,7 +420,13 @@ export default function SalesPage() {
         products: preparedProducts,
         subtotal,
         total,
-      });
+      };
+
+      if (profile?.role === "admin") {
+        updatedFields.shared = editVisibility === "Shared";
+      }
+
+      await updateDoc(doc(db, "sales", editingSale.id), updatedFields);
 
       setEditDialogOpen(false);
       setEditingSale(null);
@@ -417,11 +438,14 @@ export default function SalesPage() {
     }
   };
 
-  const handleApprove = async (id: string) => {
+  const handleToggleVisibility = async (sale: Sale) => {
+    if (profile?.role !== "admin") return;
     try {
-      await updateDoc(doc(db, "sales", id), { approved: true });
+      await updateDoc(doc(db, "sales", sale.id), {
+        shared: !sale.shared
+      });
     } catch (err) {
-      console.error("Error approving sale:", err);
+      console.error("Error toggling sale visibility:", err);
     }
   };
 
@@ -543,6 +567,23 @@ export default function SalesPage() {
                       required
                     />
                   </div>
+                  {profile?.role === "admin" && (
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="visibility" required>Visibility</RequiredLabel>
+                      <Select
+                        value={visibility}
+                        onValueChange={(val: "Shared" | "Only Me") => setVisibility(val)}
+                      >
+                        <SelectTrigger id="visibility">
+                          <SelectValue placeholder="Select visibility" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Shared">Shared</SelectItem>
+                          <SelectItem value="Only Me">Only Me</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-4 border-t border-border pt-4">
@@ -682,7 +723,7 @@ export default function SalesPage() {
                     <TableHead>Method</TableHead>
                     <TableHead className="text-right">Total Amount</TableHead>
                     {profile?.role === "admin" && (
-                      <TableHead className="text-center">Status</TableHead>
+                      <TableHead className="text-center">Visibility (Click to Toggle)</TableHead>
                     )}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -704,15 +745,21 @@ export default function SalesPage() {
                       </TableCell>
                       {profile?.role === "admin" && (
                         <TableCell className="text-center">
-                          {sale.approved ? (
-                            <Badge className="bg-green-100 hover:bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal">
-                              Approved
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-yellow-100 hover:bg-yellow-100 text-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-400 border-none font-sans font-normal">
-                              Pending
-                            </Badge>
-                          )}
+                          <button
+                            onClick={() => handleToggleVisibility(sale)}
+                            className="focus:outline-none"
+                            title="Click to toggle visibility"
+                          >
+                            {sale.shared ? (
+                              <Badge className="bg-green-100 hover:bg-green-200 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal cursor-pointer">
+                                Shared
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-zinc-100 hover:bg-zinc-200 text-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-400 border-none font-sans font-normal cursor-pointer">
+                                Only Me
+                              </Badge>
+                            )}
+                          </button>
                         </TableCell>
                       )}
                       <TableCell className="text-right">
@@ -725,7 +772,7 @@ export default function SalesPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {(profile?.role === "admin" || !sale.approved) && (
+                          {(profile?.role === "admin" || !sale.shared) && (
                             <Button
                               onClick={() => handleOpenEdit(sale)}
                               size="icon"
@@ -736,26 +783,14 @@ export default function SalesPage() {
                             </Button>
                           )}
                           {profile?.role === "admin" && (
-                            <>
-                              {!sale.approved && (
-                                <Button
-                                  onClick={() => handleApprove(sale.id)}
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-8 w-8 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 border-green-200"
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <Button
-                                onClick={() => triggerDelete(sale.id)}
-                                size="icon"
-                                variant="outline"
-                                className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
+                            <Button
+                              onClick={() => triggerDelete(sale.id)}
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           )}
                         </div>
                       </TableCell>
@@ -848,6 +883,23 @@ export default function SalesPage() {
                     required
                   />
                 </div>
+                {profile?.role === "admin" && (
+                  <div className="space-y-2">
+                    <RequiredLabel htmlFor="editVisibility" required>Visibility</RequiredLabel>
+                    <Select
+                      value={editVisibility}
+                      onValueChange={(val: "Shared" | "Only Me") => setEditVisibility(val)}
+                    >
+                      <SelectTrigger id="editVisibility">
+                        <SelectValue placeholder="Select visibility" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Shared">Shared</SelectItem>
+                        <SelectItem value="Only Me">Only Me</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-4 border-t border-border pt-4">

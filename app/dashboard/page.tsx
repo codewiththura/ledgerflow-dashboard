@@ -78,7 +78,7 @@ export default function DashboardPage() {
     } else {
       salesQuery = query(
         collection(db, "sales"), 
-        where("approved", "==", true),
+        where("shared", "==", true),
         orderBy("date", "asc")
       );
     }
@@ -102,7 +102,7 @@ export default function DashboardPage() {
     } else {
       expensesQuery = query(
         collection(db, "expenses"), 
-        where("approved", "==", true),
+        where("shared", "==", true),
         orderBy("date", "asc")
       );
     }

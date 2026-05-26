@@ -6,7 +6,6 @@ import {
   addDoc, 
   onSnapshot, 
   query, 
-  where, 
   orderBy, 
   doc, 
   updateDoc, 
@@ -22,7 +21,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Check, Plus, Trash2, Edit } from "lucide-react";
+import { Plus, Trash2, Edit } from "lucide-react";
 import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -31,7 +30,6 @@ interface Product {
   name: string;
   price: number;
   category: string;
-  approved: boolean;
   createdBy: string;
   createdAt: string;
 }
@@ -66,16 +64,8 @@ export default function ProductsPage() {
   useEffect(() => {
     if (!profile) return;
 
-    let productsQuery;
-    if (profile.role === "admin") {
-      productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
-    } else {
-      productsQuery = query(
-        collection(db, "products"), 
-        where("approved", "==", true),
-        orderBy("createdAt", "desc")
-      );
-    }
+    // All products are visible to everyone
+    const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
 
     const unsubscribe = onSnapshot(productsQuery, (snapshot) => {
       const items: Product[] = [];
@@ -86,7 +76,6 @@ export default function ProductsPage() {
           name: data.name,
           price: data.price,
           category: data.category || "General",
-          approved: data.approved,
           createdBy: data.createdBy,
           createdAt: data.createdAt
         } as Product);
@@ -121,12 +110,10 @@ export default function ProductsPage() {
 
     setSubmitting(true);
     try {
-      const isApproved = profile?.role === "admin";
       await addDoc(collection(db, "products"), {
         name: name.trim(),
         price: parsedPrice,
         category: category.trim(),
-        approved: isApproved,
         createdBy: profile?.uid || "",
         createdAt: new Date().toISOString(),
       });
@@ -174,11 +161,13 @@ export default function ProductsPage() {
 
     setUpdating(true);
     try {
-      await updateDoc(doc(db, "products", editingProduct.id), {
+      const updatedFields = {
         name: editName.trim(),
         price: parsedPrice,
         category: editCategory.trim(),
-      });
+      };
+      
+      await updateDoc(doc(db, "products", editingProduct.id), updatedFields);
       setEditDialogOpen(false);
       setEditingProduct(null);
     } catch (err) {
@@ -186,14 +175,6 @@ export default function ProductsPage() {
       setEditFormError("Failed to update product.");
     } finally {
       setUpdating(false);
-    }
-  };
-
-  const handleApprove = async (id: string) => {
-    try {
-      await updateDoc(doc(db, "products", id), { approved: true });
-    } catch (err) {
-      console.error("Error approving product:", err);
     }
   };
 
@@ -316,9 +297,6 @@ export default function ProductsPage() {
                     <TableHead>Product Name</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead className="text-right">Standard Price</TableHead>
-                    {profile?.role === "admin" && (
-                      <TableHead className="text-center">Status</TableHead>
-                    )}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -332,53 +310,25 @@ export default function ProductsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">${product.price.toFixed(2)}</TableCell>
-                      {profile?.role === "admin" && (
-                        <TableCell className="text-center">
-                          {product.approved ? (
-                            <Badge className="bg-green-100 hover:bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal">
-                              Approved
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-yellow-100 hover:bg-yellow-100 text-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-400 border-none font-sans font-normal">
-                              Pending
-                            </Badge>
-                          )}
-                        </TableCell>
-                      )}
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {/* Edit button available to creators/admins */}
-                          {(profile?.role === "admin" || !product.approved) && (
+                          <Button
+                            onClick={() => handleOpenEdit(product)}
+                            size="icon"
+                            variant="outline"
+                            className="h-8 w-8 text-primary border-border"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          {profile?.role === "admin" && (
                             <Button
-                              onClick={() => handleOpenEdit(product)}
+                              onClick={() => triggerDelete(product.id)}
                               size="icon"
                               variant="outline"
-                              className="h-8 w-8 text-primary border-border"
+                              className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
                             >
-                              <Edit className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" />
                             </Button>
-                          )}
-                          {profile?.role === "admin" && (
-                            <>
-                              {!product.approved && (
-                                <Button
-                                  onClick={() => handleApprove(product.id)}
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-8 w-8 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 border-green-200"
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <Button
-                                onClick={() => triggerDelete(product.id)}
-                                size="icon"
-                                variant="outline"
-                                className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
                           )}
                         </div>
                       </TableCell>

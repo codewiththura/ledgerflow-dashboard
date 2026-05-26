@@ -20,9 +20,10 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Check, Plus, Trash2, Edit } from "lucide-react";
+import { Plus, Trash2, Edit } from "lucide-react";
 import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -32,7 +33,7 @@ interface Expense {
   amount: number;
   date: string;
   note: string;
-  approved: boolean;
+  shared: boolean;
   createdBy: string;
   createdAt: string;
 }
@@ -54,6 +55,7 @@ export default function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [note, setNote] = useState("");
+  const [visibility, setVisibility] = useState<"Shared" | "Only Me">("Shared");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -63,6 +65,7 @@ export default function ExpensesPage() {
   const [editAmount, setEditAmount] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editNote, setEditNote] = useState("");
+  const [editVisibility, setEditVisibility] = useState<"Shared" | "Only Me">("Shared");
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
 
@@ -73,9 +76,10 @@ export default function ExpensesPage() {
     if (profile.role === "admin") {
       expensesQuery = query(collection(db, "expenses"), orderBy("date", "desc"));
     } else {
+      // Moderators only see records shared by admin
       expensesQuery = query(
         collection(db, "expenses"), 
-        where("approved", "==", true),
+        where("shared", "==", true),
         orderBy("date", "desc")
       );
     }
@@ -83,7 +87,17 @@ export default function ExpensesPage() {
     const unsubscribe = onSnapshot(expensesQuery, (snapshot) => {
       const items: Expense[] = [];
       snapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() } as Expense);
+        const data = doc.data();
+        items.push({ 
+          id: doc.id,
+          title: data.title,
+          amount: data.amount,
+          date: data.date,
+          note: data.note || "",
+          shared: data.shared ?? false,
+          createdBy: data.createdBy,
+          createdAt: data.createdAt
+        } as Expense);
       });
       setExpenses(items);
       setLoading(false);
@@ -115,13 +129,14 @@ export default function ExpensesPage() {
 
     setSubmitting(true);
     try {
-      const isApproved = profile?.role === "admin";
+      // If admin, they choose visibility. If moderator, it defaults to "Only Me".
+      const isShared = profile?.role === "admin" ? (visibility === "Shared") : true;
       await addDoc(collection(db, "expenses"), {
         title: title.trim(),
         amount: parsedAmount,
         date: date,
         note: note.trim(),
-        approved: isApproved,
+        shared: isShared,
         createdBy: profile?.uid || "",
         createdAt: new Date().toISOString(),
       });
@@ -130,6 +145,7 @@ export default function ExpensesPage() {
       setAmount("");
       setDate(new Date().toISOString().split("T")[0]);
       setNote("");
+      setVisibility("Shared");
       setCreateDialogOpen(false);
     } catch (err) {
       console.error("Error creating expense:", err);
@@ -145,6 +161,7 @@ export default function ExpensesPage() {
     setEditAmount(expense.amount.toString());
     setEditDate(expense.date);
     setEditNote(expense.note);
+    setEditVisibility(expense.shared ? "Shared" : "Only Me");
     setEditFormError(null);
     setEditDialogOpen(true);
   };
@@ -171,12 +188,24 @@ export default function ExpensesPage() {
 
     setUpdating(true);
     try {
-      await updateDoc(doc(db, "expenses", editingExpense.id), {
+      const updatedFields: {
+        title: string;
+        amount: number;
+        date: string;
+        note: string;
+        shared?: boolean;
+      } = {
         title: editTitle.trim(),
         amount: parsedAmount,
         date: editDate,
         note: editNote.trim(),
-      });
+      };
+
+      if (profile?.role === "admin") {
+        updatedFields.shared = editVisibility === "Shared";
+      }
+
+      await updateDoc(doc(db, "expenses", editingExpense.id), updatedFields);
       setEditDialogOpen(false);
       setEditingExpense(null);
     } catch (err) {
@@ -187,11 +216,14 @@ export default function ExpensesPage() {
     }
   };
 
-  const handleApprove = async (id: string) => {
+  const handleToggleVisibility = async (expense: Expense) => {
+    if (profile?.role !== "admin") return;
     try {
-      await updateDoc(doc(db, "expenses", id), { approved: true });
+      await updateDoc(doc(db, "expenses", expense.id), {
+        shared: !expense.shared
+      });
     } catch (err) {
-      console.error("Error approving expense:", err);
+      console.error("Error toggling expense visibility:", err);
     }
   };
 
@@ -287,6 +319,23 @@ export default function ExpensesPage() {
                     placeholder="Additional details"
                   />
                 </div>
+                {profile?.role === "admin" && (
+                  <div className="space-y-2">
+                    <RequiredLabel htmlFor="visibility" required>Visibility</RequiredLabel>
+                    <Select
+                      value={visibility}
+                      onValueChange={(val: "Shared" | "Only Me") => setVisibility(val)}
+                    >
+                      <SelectTrigger id="visibility">
+                        <SelectValue placeholder="Select visibility" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Shared">Shared</SelectItem>
+                        <SelectItem value="Only Me">Only Me</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <DialogFooter className="pt-4">
                   <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
                     Cancel
@@ -325,7 +374,7 @@ export default function ExpensesPage() {
                     <TableHead>Notes</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     {profile?.role === "admin" && (
-                      <TableHead className="text-center">Status</TableHead>
+                      <TableHead className="text-center">Visibility (Click to Toggle)</TableHead>
                     )}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -341,20 +390,26 @@ export default function ExpensesPage() {
                       <TableCell className="text-right">${expense.amount.toFixed(2)}</TableCell>
                       {profile?.role === "admin" && (
                         <TableCell className="text-center">
-                          {expense.approved ? (
-                            <Badge className="bg-green-100 hover:bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal">
-                              Approved
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-yellow-100 hover:bg-yellow-100 text-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-400 border-none font-sans font-normal">
-                              Pending
-                            </Badge>
-                          )}
+                          <button
+                            onClick={() => handleToggleVisibility(expense)}
+                            className="focus:outline-none"
+                            title="Click to toggle visibility"
+                          >
+                            {expense.shared ? (
+                              <Badge className="bg-green-100 hover:bg-green-200 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal cursor-pointer">
+                                Shared
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-zinc-100 hover:bg-zinc-200 text-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-400 border-none font-sans font-normal cursor-pointer">
+                                Only Me
+                              </Badge>
+                            )}
+                          </button>
                         </TableCell>
                       )}
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {(profile?.role === "admin" || !expense.approved) && (
+                          {(profile?.role === "admin" || !expense.shared) && (
                             <Button
                               onClick={() => handleOpenEdit(expense)}
                               size="icon"
@@ -365,26 +420,14 @@ export default function ExpensesPage() {
                             </Button>
                           )}
                           {profile?.role === "admin" && (
-                            <>
-                              {!expense.approved && (
-                                <Button
-                                  onClick={() => handleApprove(expense.id)}
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-8 w-8 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 border-green-200"
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <Button
-                                onClick={() => triggerDelete(expense.id)}
-                                size="icon"
-                                variant="outline"
-                                className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
+                            <Button
+                              onClick={() => triggerDelete(expense.id)}
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           )}
                         </div>
                       </TableCell>
@@ -456,6 +499,23 @@ export default function ExpensesPage() {
                   placeholder="Additional details"
                 />
               </div>
+              {profile?.role === "admin" && (
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="edit-visibility" required>Visibility</RequiredLabel>
+                  <Select
+                    value={editVisibility}
+                    onValueChange={(val: "Shared" | "Only Me") => setEditVisibility(val)}
+                  >
+                    <SelectTrigger id="edit-visibility">
+                      <SelectValue placeholder="Select visibility" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Shared">Shared</SelectItem>
+                      <SelectItem value="Only Me">Only Me</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <DialogFooter className="pt-4">
                 <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={updating}>
                   Cancel
