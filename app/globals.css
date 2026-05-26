@@ -122,15 +122,19 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body, html {
+
+  body,
+  html {
     font-family: "Product Sans", "Google Sans", sans-serif !important;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   @media (max-width: 640px) {
     html {
-      font-size: 150% !important;
+      font-size: 110% !important;
     }
   }
 }
