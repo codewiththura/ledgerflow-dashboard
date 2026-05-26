@@ -381,10 +381,6 @@ export default function SalesPage() {
     e.preventDefault();
     setFormError(null);
 
-    if (!customerEmail.trim()) {
-      setFormError("Customer email is required.");
-      return;
-    }
     if (!transactionName.trim()) {
       setFormError("Transaction name/description is required.");
       return;
@@ -532,10 +528,6 @@ export default function SalesPage() {
 
     setEditFormError(null);
 
-    if (!editCustomerEmail.trim()) {
-      setEditFormError("Customer email is required.");
-      return;
-    }
     if (!editTransactionName.trim()) {
       setEditFormError("Transaction name/description is required.");
       return;
@@ -806,14 +798,13 @@ export default function SalesPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <RequiredLabel htmlFor="customerEmail" required>Customer Email</RequiredLabel>
+                      <RequiredLabel htmlFor="customerEmail">Customer Email</RequiredLabel>
                       <Input
                         id="customerEmail"
                         type="email"
                         value={customerEmail}
                         onChange={(e) => setCustomerEmail(e.target.value)}
                         placeholder="john.doe@example.com"
-                        required
                       />
                     </div>
                   </div>
@@ -1219,14 +1210,13 @@ export default function SalesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <RequiredLabel htmlFor="editCustomerEmail" required>Customer Email</RequiredLabel>
+                  <RequiredLabel htmlFor="editCustomerEmail">Customer Email</RequiredLabel>
                   <Input
                     id="editCustomerEmail"
                     type="email"
                     value={editCustomerEmail}
                     onChange={(e) => setEditCustomerEmail(e.target.value)}
                     placeholder="john.doe@example.com"
-                    required
                   />
                 </div>
               </div>

@@ -1,15 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  orderBy, 
-  doc, 
-  updateDoc, 
-  deleteDoc 
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  orderBy,
+  doc,
+  updateDoc,
+  deleteDoc
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/auth-context";
@@ -43,7 +43,7 @@ export default function ExpensesPage() {
   const { profile } = useAuth();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  
+
   // Custom delete confirm state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [expenseIdToDelete, setExpenseIdToDelete] = useState<string | null>(null);
@@ -131,7 +131,7 @@ export default function ExpensesPage() {
         createdBy: profile?.uid || "",
         createdAt: new Date().toISOString(),
       });
-      
+
       setTitle("");
       setAmount("");
       setDate(new Date().toISOString().split("T")[0]);
@@ -404,7 +404,7 @@ export default function ExpensesPage() {
                       )}
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {(profile?.role === "admin" || !expense.shared) && (
+                          {(profile?.role === "admin" || expense.shared) && (
                             <Button
                               onClick={() => handleOpenEdit(expense)}
                               size="icon"
