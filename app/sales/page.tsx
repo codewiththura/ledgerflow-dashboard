@@ -41,6 +41,7 @@ interface Sale {
   id: string;
   customerSocialName: string;
   customerEmail: string;
+  customerChannel?: string;
   transactionName: string;
   transactionMethod: "Kpay" | "Aya";
   date: string;
@@ -97,10 +98,11 @@ export default function SalesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Sale creation discount & note fields
+  // Sale creation discount, note & channel fields
   const [discountType, setDiscountType] = useState("None");
   const [discountAmount, setDiscountAmount] = useState("0");
   const [note, setNote] = useState("");
+  const [customerChannel, setCustomerChannel] = useState("facebook");
 
   // Editing form fields
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
@@ -114,10 +116,11 @@ export default function SalesPage() {
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
 
-  // Sale editing discount & note fields
+  // Sale editing discount, note & channel fields
   const [editDiscountType, setEditDiscountType] = useState("None");
   const [editDiscountAmount, setEditDiscountAmount] = useState("0");
   const [editNote, setEditNote] = useState("");
+  const [editCustomerChannel, setEditCustomerChannel] = useState("facebook");
 
   // Predefined discounts real-time listener
   useEffect(() => {
@@ -286,26 +289,54 @@ export default function SalesPage() {
     const selectedProd = productsCatalog.find((p) => p.id === productId);
     if (!selectedProd) return;
 
-    const newItems = [...saleItems];
-    newItems[index] = {
-      ...newItems[index],
-      productId,
-      price: selectedProd.price.toString()
-    };
-    setSaleItems(newItems);
+    const existingIndex = saleItems.findIndex((item, idx) => item.productId === productId && idx !== index);
+
+    if (existingIndex !== -1) {
+      const newItems = [...saleItems];
+      const existingQty = parseInt(newItems[existingIndex].quantity) || 1;
+      const currentQty = parseInt(newItems[index].quantity) || 1;
+      newItems[existingIndex] = {
+        ...newItems[existingIndex],
+        quantity: (existingQty + currentQty).toString()
+      };
+      newItems.splice(index, 1);
+      setSaleItems(newItems);
+    } else {
+      const newItems = [...saleItems];
+      newItems[index] = {
+        ...newItems[index],
+        productId,
+        price: selectedProd.price.toString()
+      };
+      setSaleItems(newItems);
+    }
   };
 
   const handleEditProductSelect = (index: number, productId: string) => {
     const selectedProd = productsCatalog.find((p) => p.id === productId);
     if (!selectedProd) return;
 
-    const newItems = [...editSaleItems];
-    newItems[index] = {
-      ...newItems[index],
-      productId,
-      price: selectedProd.price.toString()
-    };
-    setEditSaleItems(newItems);
+    const existingIndex = editSaleItems.findIndex((item, idx) => item.productId === productId && idx !== index);
+
+    if (existingIndex !== -1) {
+      const newItems = [...editSaleItems];
+      const existingQty = parseInt(newItems[existingIndex].quantity) || 1;
+      const currentQty = parseInt(newItems[index].quantity) || 1;
+      newItems[existingIndex] = {
+        ...newItems[existingIndex],
+        quantity: (existingQty + currentQty).toString()
+      };
+      newItems.splice(index, 1);
+      setEditSaleItems(newItems);
+    } else {
+      const newItems = [...editSaleItems];
+      newItems[index] = {
+        ...newItems[index],
+        productId,
+        price: selectedProd.price.toString()
+      };
+      setEditSaleItems(newItems);
+    }
   };
 
   const handleItemChange = (index: number, key: "price" | "quantity", value: string) => {
@@ -363,7 +394,7 @@ export default function SalesPage() {
       return;
     }
 
-    const preparedProducts: ProductItem[] = [];
+    const mergedPrepared: { [productId: string]: ProductItem } = {};
     for (const item of saleItems) {
       if (!item.productId) {
         setFormError("Please select a product for all rows.");
@@ -381,13 +412,20 @@ export default function SalesPage() {
       }
 
       const originalProduct = productsCatalog.find((p) => p.id === item.productId);
-      preparedProducts.push({
-        productId: item.productId,
-        name: originalProduct?.name || "Unknown Product",
-        price: pPrice,
-        quantity: pQty
-      });
+      const prodName = originalProduct?.name || "Unknown Product";
+      if (mergedPrepared[item.productId]) {
+        mergedPrepared[item.productId].quantity += pQty;
+        mergedPrepared[item.productId].price = pPrice;
+      } else {
+        mergedPrepared[item.productId] = {
+          productId: item.productId,
+          name: prodName,
+          price: pPrice,
+          quantity: pQty
+        };
+      }
     }
+    const preparedProducts = Object.values(mergedPrepared);
 
     setSubmitting(true);
     try {
@@ -411,6 +449,7 @@ export default function SalesPage() {
       await addDoc(collection(db, "sales"), {
         customerSocialName: customerName.trim(),
         customerEmail: customerEmail.trim(),
+        customerChannel,
         transactionName: transactionName.trim(),
         transactionMethod,
         date,
@@ -428,6 +467,7 @@ export default function SalesPage() {
       // Reset form
       setCustomerName("");
       setCustomerEmail("");
+      setCustomerChannel("facebook");
       setTransactionName("");
       setTransactionMethod("Kpay");
       setDate(new Date().toISOString().split("T")[0]);
@@ -450,6 +490,7 @@ export default function SalesPage() {
     setEditingSale(sale);
     setEditCustomerName(sale.customerSocialName);
     setEditCustomerEmail(sale.customerEmail);
+    setEditCustomerChannel(sale.customerChannel || "facebook");
     setEditTransactionName(sale.transactionName);
     setEditTransactionMethod(sale.transactionMethod);
     setEditDate(sale.date);
@@ -504,7 +545,7 @@ export default function SalesPage() {
       return;
     }
 
-    const preparedProducts: ProductItem[] = [];
+    const mergedPrepared: { [productId: string]: ProductItem } = {};
     for (const item of editSaleItems) {
       if (!item.productId) {
         setEditFormError("Please select a product for all rows.");
@@ -522,13 +563,20 @@ export default function SalesPage() {
       }
 
       const originalProduct = productsCatalog.find((p) => p.id === item.productId);
-      preparedProducts.push({
-        productId: item.productId,
-        name: originalProduct?.name || "Unknown Product",
-        price: pPrice,
-        quantity: pQty
-      });
+      const prodName = originalProduct?.name || "Unknown Product";
+      if (mergedPrepared[item.productId]) {
+        mergedPrepared[item.productId].quantity += pQty;
+        mergedPrepared[item.productId].price = pPrice;
+      } else {
+        mergedPrepared[item.productId] = {
+          productId: item.productId,
+          name: prodName,
+          price: pPrice,
+          quantity: pQty
+        };
+      }
     }
+    const preparedProducts = Object.values(mergedPrepared);
 
     setUpdating(true);
     try {
@@ -551,6 +599,7 @@ export default function SalesPage() {
       const updatedFields: {
         customerSocialName: string;
         customerEmail: string;
+        customerChannel: string;
         transactionName: string;
         transactionMethod: "Kpay" | "Aya";
         date: string;
@@ -564,6 +613,7 @@ export default function SalesPage() {
       } = {
         customerSocialName: editCustomerName.trim(),
         customerEmail: editCustomerEmail.trim(),
+        customerChannel: editCustomerChannel,
         transactionName: editTransactionName.trim(),
         transactionMethod: editTransactionMethod,
         date: editDate,
@@ -697,7 +747,7 @@ export default function SalesPage() {
                         No predefined discounts created.
                       </div>
                     ) : (
-                      <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                      <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
                         {predefinedDiscounts.map((d) => (
                           <div key={d.id} className="flex justify-between items-center bg-muted/40 p-2 rounded border border-border">
                             <div>
@@ -775,7 +825,7 @@ export default function SalesPage() {
                         id="transactionName"
                         value={transactionName}
                         onChange={(e) => setTransactionName(e.target.value)}
-                        placeholder="E.g. Invoice 12456"
+                        placeholder="E.g. John Doe 26/05/2026"
                         required
                       />
                     </div>
@@ -807,7 +857,28 @@ export default function SalesPage() {
                         required
                       />
                     </div>
-                    {profile?.role === "admin" && (
+                    <div className="space-y-2">
+                      <RequiredLabel htmlFor="customerChannel" required>Source Channel</RequiredLabel>
+                      <Select
+                        value={customerChannel}
+                        onValueChange={(val) => setCustomerChannel(val)}
+                      >
+                        <SelectTrigger id="customerChannel">
+                          <SelectValue placeholder="Select Source Channel" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="facebook">Facebook</SelectItem>
+                          <SelectItem value="tiktok">TikTok</SelectItem>
+                          <SelectItem value="telegram">Telegram</SelectItem>
+                          <SelectItem value="web">Web</SelectItem>
+                          <SelectItem value="person">Person</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {profile?.role === "admin" && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <RequiredLabel htmlFor="visibility" required>Visibility</RequiredLabel>
                         <Select
@@ -823,8 +894,8 @@ export default function SalesPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-border pt-4">
                     <div className="space-y-2">
@@ -873,7 +944,7 @@ export default function SalesPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <RequiredLabel htmlFor="note">Transaction Note (Optional)</RequiredLabel>
+                    <RequiredLabel htmlFor="note">Note (Optional)</RequiredLabel>
                     <Input
                       id="note"
                       value={note}
@@ -1167,7 +1238,7 @@ export default function SalesPage() {
                     id="editTransactionName"
                     value={editTransactionName}
                     onChange={(e) => setEditTransactionName(e.target.value)}
-                    placeholder="E.g. Invoice 12456"
+                    placeholder="E.g. John Doe 26/05/2026"
                     required
                   />
                 </div>
@@ -1199,7 +1270,28 @@ export default function SalesPage() {
                     required
                   />
                 </div>
-                {profile?.role === "admin" && (
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editCustomerChannel" required>Source Channel</RequiredLabel>
+                  <Select
+                    value={editCustomerChannel}
+                    onValueChange={(val) => setEditCustomerChannel(val)}
+                  >
+                    <SelectTrigger id="editCustomerChannel">
+                      <SelectValue placeholder="Select Source Channel" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="facebook">Facebook</SelectItem>
+                      <SelectItem value="tiktok">TikTok</SelectItem>
+                      <SelectItem value="telegram">Telegram</SelectItem>
+                      <SelectItem value="web">Web</SelectItem>
+                      <SelectItem value="person">Person</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {profile?.role === "admin" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <RequiredLabel htmlFor="editVisibility" required>Visibility</RequiredLabel>
                     <Select
@@ -1215,8 +1307,8 @@ export default function SalesPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-border pt-4">
                 <div className="space-y-2">
@@ -1265,7 +1357,7 @@ export default function SalesPage() {
               </div>
 
               <div className="space-y-2">
-                <RequiredLabel htmlFor="editNote">Transaction Note (Optional)</RequiredLabel>
+                <RequiredLabel htmlFor="editNote">Note (Optional)</RequiredLabel>
                 <Input
                   id="editNote"
                   value={editNote}
@@ -1407,7 +1499,14 @@ export default function SalesPage() {
                 <span className="text-right font-medium">{selectedSale.customerSocialName || "-"}</span>
 
                 <span className="text-muted-foreground">Customer Email:</span>
-                <span className="text-right font-medium">{selectedSale.customerEmail}</span>
+                <span className="text-right font-medium break-all">{selectedSale.customerEmail}</span>
+
+                {selectedSale.customerChannel && (
+                  <>
+                    <span className="text-muted-foreground">Source Channel:</span>
+                    <span className="text-right font-medium capitalize">{selectedSale.customerChannel}</span>
+                  </>
+                )}
 
                 <span className="text-muted-foreground">Transaction Name:</span>
                 <span className="text-right font-medium">{selectedSale.transactionName}</span>
@@ -1419,15 +1518,26 @@ export default function SalesPage() {
               <div className="space-y-2">
                 <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider block">Products Breakdown</span>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
-                  {selectedSale.products.map((p, idx) => (
-                    <div key={idx} className="flex justify-between items-center bg-muted/30 p-2 rounded border border-border">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-xs sm:text-sm">{p.name}</span>
-                        <span className="text-xs text-muted-foreground">Qty: {p.quantity} @ Ks {p.price.toLocaleString()}</span>
+                  {(() => {
+                    const merged: ProductItem[] = [];
+                    selectedSale.products.forEach((p) => {
+                      const existing = merged.find((item) => item.productId === p.productId);
+                      if (existing) {
+                        existing.quantity += p.quantity;
+                      } else {
+                        merged.push({ ...p });
+                      }
+                    });
+                    return merged.map((p, idx) => (
+                      <div key={idx} className="flex justify-between items-center bg-muted/30 p-2 rounded border border-border">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-xs sm:text-sm">{p.name}</span>
+                          <span className="text-xs text-muted-foreground">Qty: {p.quantity} @ Ks {p.price.toLocaleString()}</span>
+                        </div>
+                        <span className="font-bold text-xs sm:text-sm">Ks {(p.price * p.quantity).toLocaleString()}</span>
                       </div>
-                      <span className="font-bold text-xs sm:text-sm">Ks {(p.price * p.quantity).toLocaleString()}</span>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
 

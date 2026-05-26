@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   collection, 
   addDoc, 
@@ -8,7 +8,8 @@ import {
   orderBy, 
   doc, 
   updateDoc, 
-  deleteDoc 
+  deleteDoc,
+  onSnapshot
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/auth-context";
@@ -25,6 +26,7 @@ import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useFirestorePagination } from "@/hooks/use-firestore-pagination";
 import { PaginationControls } from "@/components/pagination-controls";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Product {
   id: string;
@@ -40,6 +42,13 @@ export default function ProductsPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   
+  // Categories states
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [manageCategoriesOpen, setManageCategoriesOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [savingCategory, setSavingCategory] = useState(false);
+
   // Custom delete confirm state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [productIdToDelete, setProductIdToDelete] = useState<string | null>(null);
@@ -59,6 +68,58 @@ export default function ProductsPage() {
   const [editCategory, setEditCategory] = useState("");
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+
+  // Predefined categories real-time listener
+  useEffect(() => {
+    if (!profile) return;
+    const q = query(collection(db, "categories"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: { id: string; name: string }[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          name: data.name
+        });
+      });
+      setCategories(list);
+    }, (err) => {
+      console.error("Categories subscription error:", err);
+    });
+    return () => unsubscribe();
+  }, [profile]);
+
+  const handleAddCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCategoryError(null);
+    if (!newCategoryName.trim()) {
+      setCategoryError("Category name is required.");
+      return;
+    }
+
+    setSavingCategory(true);
+    try {
+      await addDoc(collection(db, "categories"), {
+        name: newCategoryName.trim(),
+        createdBy: profile?.uid || "",
+        createdAt: new Date().toISOString()
+      });
+      setNewCategoryName("");
+    } catch (err) {
+      console.error("Error creating category:", err);
+      setCategoryError("Failed to save category.");
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "categories", id));
+    } catch (err) {
+      console.error("Error deleting category:", err);
+    }
+  };
 
   const createProductsQuery = React.useCallback(() => {
     return query(collection(db, "products"), orderBy("createdAt", "desc"));
@@ -203,70 +264,147 @@ export default function ProductsPage() {
             </p>
           </div>
 
-          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Add Product
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Add New Product</DialogTitle>
-                <DialogDescription>
-                  Enter details for the new product.
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleCreateProduct} className="space-y-4 py-4">
-                {formError && (
-                  <Alert variant="destructive">
-                    <AlertTitle>Error</AlertTitle>
-                    <AlertDescription>{formError}</AlertDescription>
-                  </Alert>
-                )}
-                <div className="space-y-2">
-                  <RequiredLabel htmlFor="name" required>Product Name</RequiredLabel>
-                  <Input
-                    id="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Product Name"
-                    required
-                  />
+          <div className="flex flex-wrap gap-2 items-center">
+            {/* Manage Categories Dialog */}
+            <Dialog open={manageCategoriesOpen} onOpenChange={setManageCategoriesOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="flex items-center gap-2">
+                  Manage Categories
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Manage Categories</DialogTitle>
+                  <DialogDescription>
+                    Create or delete product categories.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <form onSubmit={handleAddCategory} className="flex gap-2">
+                    <Input
+                      placeholder="Category name"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      required
+                    />
+                    <Button type="submit" disabled={savingCategory}>
+                      {savingCategory ? "Adding..." : "Add"}
+                    </Button>
+                  </form>
+                  {categoryError && (
+                    <p className="text-xs text-destructive">{categoryError}</p>
+                  )}
+                  <div className="border-t border-border pt-4">
+                    <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider block mb-2">Category List</span>
+                    {categories.length === 0 ? (
+                      <div className="text-xs text-muted-foreground py-4 text-center">
+                        No categories created.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+                        {categories.map((cat) => (
+                          <div key={cat.id} className="flex justify-between items-center bg-muted/40 p-2 rounded border border-border">
+                            <span className="font-medium text-sm">{cat.name}</span>
+                            <Button
+                              onClick={() => handleDeleteCategory(cat.id)}
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <RequiredLabel htmlFor="category" required>Category</RequiredLabel>
-                  <Input
-                    id="category"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    placeholder="E.g. Electronics, Clothing"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <RequiredLabel htmlFor="price" required>Standard Price</RequiredLabel>
-                  <Input
-                    id="price"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="0.00"
-                    required
-                  />
-                </div>
-                <DialogFooter className="pt-4">
-                  <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={submitting}>
-                    {submitting ? "Saving..." : "Save Product"}
-                  </Button>
+                <DialogFooter>
+                  <Button onClick={() => setManageCategoriesOpen(false)}>Done</Button>
                 </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+              </DialogContent>
+            </Dialog>
+
+            {/* Add Product Dialog */}
+            <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="flex items-center gap-2">
+                  <Plus className="h-4 w-4" /> Add Product
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Add New Product</DialogTitle>
+                  <DialogDescription>
+                    Enter details for the new product.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleCreateProduct} className="space-y-4 py-4">
+                  {formError && (
+                    <Alert variant="destructive">
+                      <AlertTitle>Error</AlertTitle>
+                      <AlertDescription>{formError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <div className="space-y-2">
+                    <RequiredLabel htmlFor="name" required>Product Name</RequiredLabel>
+                    <Input
+                      id="name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Product Name"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <RequiredLabel htmlFor="category" required>Category</RequiredLabel>
+                    {categories.length === 0 ? (
+                      <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
+                        No categories created. Please add one first using &quot;Manage Categories&quot;.
+                      </div>
+                    ) : (
+                      <Select
+                        value={category}
+                        onValueChange={setCategory}
+                      >
+                        <SelectTrigger id="category">
+                          <SelectValue placeholder="Select Category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categories.map((cat) => (
+                            <SelectItem key={cat.id} value={cat.name}>
+                              {cat.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <RequiredLabel htmlFor="price" required>Standard Price</RequiredLabel>
+                    <Input
+                      id="price"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={price}
+                      onChange={(e) => setPrice(e.target.value)}
+                      placeholder="0.00"
+                      required
+                    />
+                  </div>
+                  <DialogFooter className="pt-4">
+                    <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={submitting || categories.length === 0}>
+                      {submitting ? "Saving..." : "Save Product"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
         <Card className="border border-border shadow-sm">
@@ -377,13 +515,27 @@ export default function ProductsPage() {
               </div>
               <div className="space-y-2">
                 <RequiredLabel htmlFor="edit-category" required>Category</RequiredLabel>
-                <Input
-                  id="edit-category"
-                  value={editCategory}
-                  onChange={(e) => setEditCategory(e.target.value)}
-                  placeholder="E.g. Electronics, Clothing"
-                  required
-                />
+                {categories.length === 0 ? (
+                  <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
+                    No categories created. Please add one first using &quot;Manage Categories&quot;.
+                  </div>
+                ) : (
+                  <Select
+                    value={editCategory}
+                    onValueChange={setEditCategory}
+                  >
+                    <SelectTrigger id="edit-category">
+                      <SelectValue placeholder="Select Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.name}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="space-y-2">
                 <RequiredLabel htmlFor="edit-price" required>Standard Price</RequiredLabel>
@@ -402,7 +554,7 @@ export default function ProductsPage() {
                 <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={updating}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={updating}>
+                <Button type="submit" disabled={updating || categories.length === 0}>
                   {updating ? "Saving..." : "Save Changes"}
                 </Button>
               </DialogFooter>
