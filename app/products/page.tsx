@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import { 
   collection, 
   addDoc, 
-  onSnapshot, 
   query, 
   orderBy, 
   doc, 
@@ -24,6 +23,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Plus, Trash2, Edit } from "lucide-react";
 import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useFirestorePagination } from "@/hooks/use-firestore-pagination";
+import { PaginationControls } from "@/components/pagination-controls";
 
 interface Product {
   id: string;
@@ -36,8 +37,6 @@ interface Product {
 
 export default function ProductsPage() {
   const { profile } = useAuth();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   
@@ -61,34 +60,27 @@ export default function ProductsPage() {
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
 
-  useEffect(() => {
-    if (!profile) return;
+  const createProductsQuery = React.useCallback(() => {
+    return query(collection(db, "products"), orderBy("createdAt", "desc"));
+  }, []);
 
-    // All products are visible to everyone
-    const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
-
-    const unsubscribe = onSnapshot(productsQuery, (snapshot) => {
-      const items: Product[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        items.push({ 
-          id: doc.id, 
-          name: data.name,
-          price: data.price,
-          category: data.category || "General",
-          createdBy: data.createdBy,
-          createdAt: data.createdAt
-        } as Product);
-      });
-      setProducts(items);
-      setLoading(false);
-    }, (error) => {
-      console.error("Products subscription error:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [profile]);
+  const {
+    items: products,
+    loading,
+    page,
+    pageSize,
+    setPageSize,
+    totalCount,
+    hasMore,
+    nextPage,
+    prevPage,
+    refresh
+  } = useFirestorePagination<Product>(
+    createProductsQuery,
+    10,
+    [],
+    !!profile
+  );
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,6 +114,7 @@ export default function ProductsPage() {
       setPrice("");
       setCategory("");
       setCreateDialogOpen(false);
+      await refresh();
     } catch (err) {
       console.error("Error creating product:", err);
       setFormError("Failed to save product.");
@@ -170,6 +163,7 @@ export default function ProductsPage() {
       await updateDoc(doc(db, "products", editingProduct.id), updatedFields);
       setEditDialogOpen(false);
       setEditingProduct(null);
+      await refresh();
     } catch (err) {
       console.error("Error updating product:", err);
       setEditFormError("Failed to update product.");
@@ -190,6 +184,7 @@ export default function ProductsPage() {
       await deleteDoc(doc(db, "products", productIdToDelete));
       setDeleteConfirmOpen(false);
       setProductIdToDelete(null);
+      await refresh();
     } catch (err) {
       console.error("Error deleting product:", err);
     } finally {
@@ -278,7 +273,7 @@ export default function ProductsPage() {
           <CardHeader className="p-4 sm:p-6 border-b border-border">
             <CardTitle className="text-md font-bold font-sans">Products List</CardTitle>
             <CardDescription className="text-xs font-sans">
-              {products.length} products total in database.
+              {totalCount} products total in database.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
@@ -338,6 +333,18 @@ export default function ProductsPage() {
               </Table>
             )}
           </CardContent>
+          {!loading && products.length > 0 && (
+            <PaginationControls
+              page={page}
+              pageSize={pageSize}
+              totalCount={totalCount}
+              onPageSizeChange={setPageSize}
+              onPrevPage={prevPage}
+              onNextPage={nextPage}
+              hasMore={hasMore}
+              loading={loading}
+            />
+          )}
         </Card>
       </div>
 

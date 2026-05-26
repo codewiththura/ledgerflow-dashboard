@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import { 
   collection, 
   addDoc, 
-  onSnapshot, 
   query, 
   where, 
   orderBy, 
@@ -27,6 +26,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Plus, Trash2, Eye, Edit } from "lucide-react";
 import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useFirestorePagination } from "@/hooks/use-firestore-pagination";
+import { PaginationControls } from "@/components/pagination-controls";
 
 interface ProductItem {
   productId: string;
@@ -58,9 +59,7 @@ interface ProductCatalogItem {
 
 export default function SalesPage() {
   const { profile } = useAuth();
-  const [sales, setSales] = useState<Sale[]>([]);
   const [productsCatalog, setProductsCatalog] = useState<ProductCatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
   
   // Dialog Open states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -98,50 +97,37 @@ export default function SalesPage() {
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
 
-  // Fetch sales list
-  useEffect(() => {
-    if (!profile) return;
+  const createSalesQuery = React.useCallback(() => {
+    if (!profile) return query(collection(db, "sales"), orderBy("date", "desc"));
 
-    let salesQuery;
     if (profile.role === "admin") {
-      salesQuery = query(collection(db, "sales"), orderBy("date", "desc"));
+      return query(collection(db, "sales"), orderBy("date", "desc"));
     } else {
-      // Moderators can only see records shared by admin
-      salesQuery = query(
-        collection(db, "sales"), 
+      return query(
+        collection(db, "sales"),
         where("shared", "==", true),
         orderBy("date", "desc")
       );
     }
-
-    const unsubscribe = onSnapshot(salesQuery, (snapshot) => {
-      const items: Sale[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        items.push({ 
-          id: doc.id, 
-          customerSocialName: data.customerSocialName || "",
-          customerEmail: data.customerEmail || "",
-          transactionName: data.transactionName,
-          transactionMethod: data.transactionMethod,
-          date: data.date,
-          products: data.products || [],
-          subtotal: data.subtotal || 0,
-          total: data.total || 0,
-          shared: data.shared ?? false,
-          createdBy: data.createdBy,
-          createdAt: data.createdAt
-        } as Sale);
-      });
-      setSales(items);
-      setLoading(false);
-    }, (error) => {
-      console.error("Sales subscription error:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
   }, [profile]);
+
+  const {
+    items: sales,
+    loading,
+    page,
+    pageSize,
+    setPageSize,
+    totalCount,
+    hasMore,
+    nextPage,
+    prevPage,
+    refresh
+  } = useFirestorePagination<Sale>(
+    createSalesQuery,
+    10,
+    [profile?.role],
+    !!profile
+  );
 
   useEffect(() => {
     const fetchProductsCatalog = async () => {
@@ -325,6 +311,7 @@ export default function SalesPage() {
       setSaleItems([{ productId: "", price: "", quantity: "1" }]);
       setVisibility("Shared");
       setCreateDialogOpen(false);
+      await refresh();
     } catch (err) {
       console.error("Error creating sale record:", err);
       setFormError("Failed to save sale transaction.");
@@ -430,6 +417,7 @@ export default function SalesPage() {
 
       setEditDialogOpen(false);
       setEditingSale(null);
+      await refresh();
     } catch (err) {
       console.error("Error updating sale record:", err);
       setEditFormError("Failed to update sale transaction.");
@@ -444,6 +432,7 @@ export default function SalesPage() {
       await updateDoc(doc(db, "sales", sale.id), {
         shared: !sale.shared
       });
+      await refresh();
     } catch (err) {
       console.error("Error toggling sale visibility:", err);
     }
@@ -461,6 +450,7 @@ export default function SalesPage() {
       await deleteDoc(doc(db, "sales", saleIdToDelete));
       setDeleteConfirmOpen(false);
       setSaleIdToDelete(null);
+      await refresh();
     } catch (err) {
       console.error("Error deleting sale record:", err);
     } finally {
@@ -700,7 +690,7 @@ export default function SalesPage() {
           <CardHeader className="p-4 sm:p-6 border-b border-border">
             <CardTitle className="text-md font-bold font-sans">Sales Log</CardTitle>
             <CardDescription className="text-xs font-sans">
-              {sales.length} transactions stored.
+              {totalCount} transactions stored.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
@@ -723,7 +713,7 @@ export default function SalesPage() {
                     <TableHead>Method</TableHead>
                     <TableHead className="text-right">Total Amount</TableHead>
                     {profile?.role === "admin" && (
-                      <TableHead className="text-center">Visibility (Click to Toggle)</TableHead>
+                      <TableHead className="text-center">Visibility</TableHead>
                     )}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -800,6 +790,18 @@ export default function SalesPage() {
               </Table>
             )}
           </CardContent>
+          {!loading && sales.length > 0 && (
+            <PaginationControls
+              page={page}
+              pageSize={pageSize}
+              totalCount={totalCount}
+              onPageSizeChange={setPageSize}
+              onPrevPage={prevPage}
+              onNextPage={nextPage}
+              hasMore={hasMore}
+              loading={loading}
+            />
+          )}
         </Card>
       </div>
 

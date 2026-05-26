@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import { 
   collection, 
   addDoc, 
-  onSnapshot, 
   query, 
   where, 
   orderBy, 
@@ -26,6 +25,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Plus, Trash2, Edit } from "lucide-react";
 import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useFirestorePagination } from "@/hooks/use-firestore-pagination";
+import { PaginationControls } from "@/components/pagination-controls";
 
 interface Expense {
   id: string;
@@ -40,8 +41,6 @@ interface Expense {
 
 export default function ExpensesPage() {
   const { profile } = useAuth();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   
@@ -69,45 +68,37 @@ export default function ExpensesPage() {
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
 
-  useEffect(() => {
-    if (!profile) return;
+  const createExpensesQuery = React.useCallback(() => {
+    if (!profile) return query(collection(db, "expenses"), orderBy("date", "desc"));
 
-    let expensesQuery;
     if (profile.role === "admin") {
-      expensesQuery = query(collection(db, "expenses"), orderBy("date", "desc"));
+      return query(collection(db, "expenses"), orderBy("date", "desc"));
     } else {
-      // Moderators only see records shared by admin
-      expensesQuery = query(
-        collection(db, "expenses"), 
+      return query(
+        collection(db, "expenses"),
         where("shared", "==", true),
         orderBy("date", "desc")
       );
     }
-
-    const unsubscribe = onSnapshot(expensesQuery, (snapshot) => {
-      const items: Expense[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        items.push({ 
-          id: doc.id,
-          title: data.title,
-          amount: data.amount,
-          date: data.date,
-          note: data.note || "",
-          shared: data.shared ?? false,
-          createdBy: data.createdBy,
-          createdAt: data.createdAt
-        } as Expense);
-      });
-      setExpenses(items);
-      setLoading(false);
-    }, (error) => {
-      console.error("Expenses subscription error:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
   }, [profile]);
+
+  const {
+    items: expenses,
+    loading,
+    page,
+    pageSize,
+    setPageSize,
+    totalCount,
+    hasMore,
+    nextPage,
+    prevPage,
+    refresh
+  } = useFirestorePagination<Expense>(
+    createExpensesQuery,
+    10,
+    [profile?.role],
+    !!profile
+  );
 
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,6 +138,7 @@ export default function ExpensesPage() {
       setNote("");
       setVisibility("Shared");
       setCreateDialogOpen(false);
+      await refresh();
     } catch (err) {
       console.error("Error creating expense:", err);
       setFormError("Failed to save expense.");
@@ -208,6 +200,7 @@ export default function ExpensesPage() {
       await updateDoc(doc(db, "expenses", editingExpense.id), updatedFields);
       setEditDialogOpen(false);
       setEditingExpense(null);
+      await refresh();
     } catch (err) {
       console.error("Error updating expense:", err);
       setEditFormError("Failed to update expense.");
@@ -222,6 +215,7 @@ export default function ExpensesPage() {
       await updateDoc(doc(db, "expenses", expense.id), {
         shared: !expense.shared
       });
+      await refresh();
     } catch (err) {
       console.error("Error toggling expense visibility:", err);
     }
@@ -239,6 +233,7 @@ export default function ExpensesPage() {
       await deleteDoc(doc(db, "expenses", expenseIdToDelete));
       setDeleteConfirmOpen(false);
       setExpenseIdToDelete(null);
+      await refresh();
     } catch (err) {
       console.error("Error deleting expense:", err);
     } finally {
@@ -353,7 +348,7 @@ export default function ExpensesPage() {
           <CardHeader className="p-4 sm:p-6 border-b border-border">
             <CardTitle className="text-md font-bold font-sans">Expenses List</CardTitle>
             <CardDescription className="text-xs font-sans">
-              {expenses.length} expenses logged.
+              {totalCount} expenses logged.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
@@ -374,7 +369,7 @@ export default function ExpensesPage() {
                     <TableHead>Notes</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     {profile?.role === "admin" && (
-                      <TableHead className="text-center">Visibility (Click to Toggle)</TableHead>
+                      <TableHead className="text-center">Visibility</TableHead>
                     )}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -437,6 +432,18 @@ export default function ExpensesPage() {
               </Table>
             )}
           </CardContent>
+          {!loading && expenses.length > 0 && (
+            <PaginationControls
+              page={page}
+              pageSize={pageSize}
+              totalCount={totalCount}
+              onPageSizeChange={setPageSize}
+              onPrevPage={prevPage}
+              onNextPage={nextPage}
+              hasMore={hasMore}
+              loading={loading}
+            />
+          )}
         </Card>
       </div>
 
