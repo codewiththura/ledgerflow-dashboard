@@ -17,13 +17,14 @@ import { useAuth } from "@/context/auth-context";
 import { NavLayout } from "@/components/nav-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, Plus, Trash2, Edit } from "lucide-react";
+import { RequiredLabel } from "@/components/required-label";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface Expense {
   id: string;
@@ -40,15 +41,30 @@ export default function ExpensesPage() {
   const { profile } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   
-  // Form fields
+  // Custom delete confirm state
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [expenseIdToDelete, setExpenseIdToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Create form fields
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Edit form fields
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editNote, setEditNote] = useState("");
+  const [editFormError, setEditFormError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     if (!profile) return;
@@ -114,12 +130,60 @@ export default function ExpensesPage() {
       setAmount("");
       setDate(new Date().toISOString().split("T")[0]);
       setNote("");
-      setDialogOpen(false);
+      setCreateDialogOpen(false);
     } catch (err) {
       console.error("Error creating expense:", err);
       setFormError("Failed to save expense.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleOpenEdit = (expense: Expense) => {
+    setEditingExpense(expense);
+    setEditTitle(expense.title);
+    setEditAmount(expense.amount.toString());
+    setEditDate(expense.date);
+    setEditNote(expense.note);
+    setEditFormError(null);
+    setEditDialogOpen(true);
+  };
+
+  const handleUpdateExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingExpense) return;
+
+    setEditFormError(null);
+    const parsedAmount = parseFloat(editAmount);
+
+    if (!editTitle.trim()) {
+      setEditFormError("Expense title is required.");
+      return;
+    }
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setEditFormError("Amount must be a valid positive number.");
+      return;
+    }
+    if (!editDate) {
+      setEditFormError("Date is required.");
+      return;
+    }
+
+    setUpdating(true);
+    try {
+      await updateDoc(doc(db, "expenses", editingExpense.id), {
+        title: editTitle.trim(),
+        amount: parsedAmount,
+        date: editDate,
+        note: editNote.trim(),
+      });
+      setEditDialogOpen(false);
+      setEditingExpense(null);
+    } catch (err) {
+      console.error("Error updating expense:", err);
+      setEditFormError("Failed to update expense.");
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -131,13 +195,22 @@ export default function ExpensesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this expense?")) {
-      try {
-        await deleteDoc(doc(db, "expenses", id));
-      } catch (err) {
-        console.error("Error deleting expense:", err);
-      }
+  const triggerDelete = (id: string) => {
+    setExpenseIdToDelete(id);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!expenseIdToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, "expenses", expenseIdToDelete));
+      setDeleteConfirmOpen(false);
+      setExpenseIdToDelete(null);
+    } catch (err) {
+      console.error("Error deleting expense:", err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -152,7 +225,7 @@ export default function ExpensesPage() {
             </p>
           </div>
 
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
             <DialogTrigger asChild>
               <Button className="flex items-center gap-2">
                 <Plus className="h-4 w-4" /> Add Expense
@@ -173,7 +246,7 @@ export default function ExpensesPage() {
                   </Alert>
                 )}
                 <div className="space-y-2">
-                  <Label htmlFor="title">Expense Title</Label>
+                  <RequiredLabel htmlFor="title" required>Expense Title</RequiredLabel>
                   <Input
                     id="title"
                     value={title}
@@ -183,7 +256,7 @@ export default function ExpensesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="amount">Amount</Label>
+                  <RequiredLabel htmlFor="amount" required>Amount</RequiredLabel>
                   <Input
                     id="amount"
                     type="number"
@@ -196,7 +269,7 @@ export default function ExpensesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="date">Date</Label>
+                  <RequiredLabel htmlFor="date" required>Date</RequiredLabel>
                   <Input
                     id="date"
                     type="date"
@@ -206,7 +279,7 @@ export default function ExpensesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="note">Notes (Optional)</Label>
+                  <RequiredLabel htmlFor="note">Notes (Optional)</RequiredLabel>
                   <Input
                     id="note"
                     value={note}
@@ -215,7 +288,7 @@ export default function ExpensesPage() {
                   />
                 </div>
                 <DialogFooter className="pt-4">
-                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
+                  <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={submitting}>
@@ -252,11 +325,9 @@ export default function ExpensesPage() {
                     <TableHead>Notes</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     {profile?.role === "admin" && (
-                      <>
-                        <TableHead className="text-center">Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </>
+                      <TableHead className="text-center">Status</TableHead>
                     )}
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -269,20 +340,32 @@ export default function ExpensesPage() {
                       </TableCell>
                       <TableCell className="text-right">${expense.amount.toFixed(2)}</TableCell>
                       {profile?.role === "admin" && (
-                        <>
-                          <TableCell className="text-center">
-                            {expense.approved ? (
-                              <Badge className="bg-green-100 hover:bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal">
-                                Approved
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-yellow-100 hover:bg-yellow-100 text-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-400 border-none font-sans font-normal">
-                                Pending
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
+                        <TableCell className="text-center">
+                          {expense.approved ? (
+                            <Badge className="bg-green-100 hover:bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal">
+                              Approved
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-yellow-100 hover:bg-yellow-100 text-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-400 border-none font-sans font-normal">
+                              Pending
+                            </Badge>
+                          )}
+                        </TableCell>
+                      )}
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          {(profile?.role === "admin" || !expense.approved) && (
+                            <Button
+                              onClick={() => handleOpenEdit(expense)}
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8 text-primary border-border"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {profile?.role === "admin" && (
+                            <>
                               {!expense.approved && (
                                 <Button
                                   onClick={() => handleApprove(expense.id)}
@@ -294,17 +377,17 @@ export default function ExpensesPage() {
                                 </Button>
                               )}
                               <Button
-                                onClick={() => handleDelete(expense.id)}
+                                onClick={() => triggerDelete(expense.id)}
                                 size="icon"
                                 variant="outline"
                                 className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
-                            </div>
-                          </TableCell>
-                        </>
-                      )}
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -313,6 +396,88 @@ export default function ExpensesPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Edit Expense Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Expense</DialogTitle>
+            <DialogDescription>
+              Update the details of this expense.
+            </DialogDescription>
+          </DialogHeader>
+          {editingExpense && (
+            <form onSubmit={handleUpdateExpense} className="space-y-4 py-4">
+              {editFormError && (
+                <Alert variant="destructive">
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>{editFormError}</AlertDescription>
+                </Alert>
+              )}
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="edit-title" required>Expense Title</RequiredLabel>
+                <Input
+                  id="edit-title"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="E.g. Office rent, utilities"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="edit-amount" required>Amount</RequiredLabel>
+                <Input
+                  id="edit-amount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="edit-date" required>Date</RequiredLabel>
+                <Input
+                  id="edit-date"
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="edit-note">Notes (Optional)</RequiredLabel>
+                <Input
+                  id="edit-note"
+                  value={editNote}
+                  onChange={(e) => setEditNote(e.target.value)}
+                  placeholder="Additional details"
+                />
+              </div>
+              <DialogFooter className="pt-4">
+                <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={updating}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={updating}>
+                  {updating ? "Saving..." : "Save Changes"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom ConfirmDialog for delete action */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete Expense"
+        description="Are you sure you want to permanently delete this expense log? This action cannot be undone."
+        onConfirm={handleConfirmDelete}
+        loading={deleting}
+      />
     </NavLayout>
   );
 }

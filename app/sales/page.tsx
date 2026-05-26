@@ -18,14 +18,15 @@ import { useAuth } from "@/context/auth-context";
 import { NavLayout } from "@/components/nav-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Check, Plus, Trash2, Eye } from "lucide-react";
+import { Check, Plus, Trash2, Eye, Edit } from "lucide-react";
+import { RequiredLabel } from "@/components/required-label";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface ProductItem {
   productId: string;
@@ -37,6 +38,7 @@ interface ProductItem {
 interface Sale {
   id: string;
   customerSocialName: string;
+  customerEmail: string;
   transactionName: string;
   transactionMethod: "Kpay" | "Aya";
   date: string;
@@ -59,12 +61,21 @@ export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [productsCatalog, setProductsCatalog] = useState<ProductCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  
+  // Dialog Open states
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+
+  // Custom delete confirm state
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [saleIdToDelete, setSaleIdToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   
-  // Form fields
+  // Creation form fields
   const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
   const [transactionName, setTransactionName] = useState("");
   const [transactionMethod, setTransactionMethod] = useState<"Kpay" | "Aya">("Kpay");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
@@ -73,6 +84,17 @@ export default function SalesPage() {
   ]);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Editing form fields
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState("");
+  const [editCustomerEmail, setEditCustomerEmail] = useState("");
+  const [editTransactionName, setEditTransactionName] = useState("");
+  const [editTransactionMethod, setEditTransactionMethod] = useState<"Kpay" | "Aya">("Kpay");
+  const [editDate, setEditDate] = useState("");
+  const [editSaleItems, setEditSaleItems] = useState<{ productId: string; price: string; quantity: string }[]>([]);
+  const [editFormError, setEditFormError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   // Fetch sales list
   useEffect(() => {
@@ -92,7 +114,21 @@ export default function SalesPage() {
     const unsubscribe = onSnapshot(salesQuery, (snapshot) => {
       const items: Sale[] = [];
       snapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() } as Sale);
+        const data = doc.data();
+        items.push({ 
+          id: doc.id, 
+          customerSocialName: data.customerSocialName || "",
+          customerEmail: data.customerEmail || "",
+          transactionName: data.transactionName,
+          transactionMethod: data.transactionMethod,
+          date: data.date,
+          products: data.products || [],
+          subtotal: data.subtotal || 0,
+          total: data.total || 0,
+          approved: data.approved,
+          createdBy: data.createdBy,
+          createdAt: data.createdAt
+        } as Sale);
       });
       setSales(items);
       setLoading(false);
@@ -104,9 +140,8 @@ export default function SalesPage() {
     return () => unsubscribe();
   }, [profile]);
 
-  // Fetch approved products catalog for creation dropdowns
   useEffect(() => {
-    const fetchProducts = async () => {
+    const fetchProductsCatalog = async () => {
       try {
         const q = query(collection(db, "products"), where("approved", "==", true));
         const snap = await getDocs(q);
@@ -120,12 +155,13 @@ export default function SalesPage() {
         console.error("Error fetching products catalog:", err);
       }
     };
-    if (dialogOpen) {
-      fetchProducts();
-    }
-  }, [dialogOpen]);
 
-  // Calculations
+    if (createDialogOpen || editDialogOpen) {
+      fetchProductsCatalog();
+    }
+  }, [createDialogOpen, editDialogOpen]);
+
+  // Calculations for Creation Form
   const calculateTotals = () => {
     let subtotal = 0;
     saleItems.forEach((item) => {
@@ -137,6 +173,19 @@ export default function SalesPage() {
   };
 
   const { subtotal: calculatedSubtotal, total: calculatedTotal } = calculateTotals();
+
+  // Calculations for Edit Form
+  const calculateEditTotals = () => {
+    let subtotal = 0;
+    editSaleItems.forEach((item) => {
+      const priceVal = parseFloat(item.price) || 0;
+      const qtyVal = parseInt(item.quantity) || 0;
+      subtotal += priceVal * qtyVal;
+    });
+    return { subtotal, total: subtotal };
+  };
+
+  const { subtotal: editCalculatedSubtotal, total: editCalculatedTotal } = calculateEditTotals();
 
   const handleProductSelect = (index: number, productId: string) => {
     const selectedProd = productsCatalog.find((p) => p.id === productId);
@@ -151,6 +200,19 @@ export default function SalesPage() {
     setSaleItems(newItems);
   };
 
+  const handleEditProductSelect = (index: number, productId: string) => {
+    const selectedProd = productsCatalog.find((p) => p.id === productId);
+    if (!selectedProd) return;
+
+    const newItems = [...editSaleItems];
+    newItems[index] = {
+      ...newItems[index],
+      productId,
+      price: selectedProd.price.toString()
+    };
+    setEditSaleItems(newItems);
+  };
+
   const handleItemChange = (index: number, key: "price" | "quantity", value: string) => {
     const newItems = [...saleItems];
     newItems[index] = {
@@ -160,8 +222,21 @@ export default function SalesPage() {
     setSaleItems(newItems);
   };
 
+  const handleEditItemChange = (index: number, key: "price" | "quantity", value: string) => {
+    const newItems = [...editSaleItems];
+    newItems[index] = {
+      ...newItems[index],
+      [key]: value
+    };
+    setEditSaleItems(newItems);
+  };
+
   const handleAddItemRow = () => {
     setSaleItems([...saleItems, { productId: "", price: "", quantity: "1" }]);
+  };
+
+  const handleAddEditItemRow = () => {
+    setEditSaleItems([...editSaleItems, { productId: "", price: "", quantity: "1" }]);
   };
 
   const handleRemoveItemRow = (index: number) => {
@@ -170,12 +245,18 @@ export default function SalesPage() {
     setSaleItems(newItems);
   };
 
+  const handleRemoveEditItemRow = (index: number) => {
+    if (editSaleItems.length === 1) return;
+    const newItems = editSaleItems.filter((_, i) => i !== index);
+    setEditSaleItems(newItems);
+  };
+
   const handleCreateSale = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
-    if (!customerName.trim()) {
-      setFormError("Customer social name is required.");
+    if (!customerEmail.trim()) {
+      setFormError("Customer email is required.");
       return;
     }
     if (!transactionName.trim()) {
@@ -220,6 +301,7 @@ export default function SalesPage() {
 
       await addDoc(collection(db, "sales"), {
         customerSocialName: customerName.trim(),
+        customerEmail: customerEmail.trim(),
         transactionName: transactionName.trim(),
         transactionMethod,
         date,
@@ -233,16 +315,105 @@ export default function SalesPage() {
 
       // Reset form
       setCustomerName("");
+      setCustomerEmail("");
       setTransactionName("");
       setTransactionMethod("Kpay");
       setDate(new Date().toISOString().split("T")[0]);
       setSaleItems([{ productId: "", price: "", quantity: "1" }]);
-      setDialogOpen(false);
+      setCreateDialogOpen(false);
     } catch (err) {
       console.error("Error creating sale record:", err);
       setFormError("Failed to save sale transaction.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleOpenEdit = (sale: Sale) => {
+    setEditingSale(sale);
+    setEditCustomerName(sale.customerSocialName);
+    setEditCustomerEmail(sale.customerEmail);
+    setEditTransactionName(sale.transactionName);
+    setEditTransactionMethod(sale.transactionMethod);
+    setEditDate(sale.date);
+    
+    // Map existing products in sale to form item states
+    const items = sale.products.map(p => ({
+      productId: p.productId,
+      price: p.price.toString(),
+      quantity: p.quantity.toString()
+    }));
+    setEditSaleItems(items);
+    setEditFormError(null);
+    setEditDialogOpen(true);
+  };
+
+  const handleUpdateSale = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSale) return;
+
+    setEditFormError(null);
+
+    if (!editCustomerEmail.trim()) {
+      setEditFormError("Customer email is required.");
+      return;
+    }
+    if (!editTransactionName.trim()) {
+      setEditFormError("Transaction name/description is required.");
+      return;
+    }
+    if (!editDate) {
+      setEditFormError("Date is required.");
+      return;
+    }
+
+    const preparedProducts: ProductItem[] = [];
+    for (const item of editSaleItems) {
+      if (!item.productId) {
+        setEditFormError("Please select a product for all rows.");
+        return;
+      }
+      const pPrice = parseFloat(item.price);
+      const pQty = parseInt(item.quantity);
+      if (isNaN(pPrice) || pPrice < 0) {
+        setEditFormError("Product price must be a valid positive number.");
+        return;
+      }
+      if (isNaN(pQty) || pQty <= 0) {
+        setEditFormError("Quantity must be greater than zero.");
+        return;
+      }
+
+      const originalProduct = productsCatalog.find((p) => p.id === item.productId);
+      preparedProducts.push({
+        productId: item.productId,
+        name: originalProduct?.name || "Unknown Product",
+        price: pPrice,
+        quantity: pQty
+      });
+    }
+
+    setUpdating(true);
+    try {
+      const { subtotal, total } = calculateEditTotals();
+      await updateDoc(doc(db, "sales", editingSale.id), {
+        customerSocialName: editCustomerName.trim(),
+        customerEmail: editCustomerEmail.trim(),
+        transactionName: editTransactionName.trim(),
+        transactionMethod: editTransactionMethod,
+        date: editDate,
+        products: preparedProducts,
+        subtotal,
+        total,
+      });
+
+      setEditDialogOpen(false);
+      setEditingSale(null);
+    } catch (err) {
+      console.error("Error updating sale record:", err);
+      setEditFormError("Failed to update sale transaction.");
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -254,13 +425,22 @@ export default function SalesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this sale record?")) {
-      try {
-        await deleteDoc(doc(db, "sales", id));
-      } catch (err) {
-        console.error("Error deleting sale record:", err);
-      }
+  const triggerDelete = (id: string) => {
+    setSaleIdToDelete(id);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!saleIdToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, "sales", saleIdToDelete));
+      setDeleteConfirmOpen(false);
+      setSaleIdToDelete(null);
+    } catch (err) {
+      console.error("Error deleting sale record:", err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -280,7 +460,7 @@ export default function SalesPage() {
             </p>
           </div>
 
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
             <DialogTrigger asChild>
               <Button className="flex items-center gap-2">
                 <Plus className="h-4 w-4" /> Add Sale
@@ -303,17 +483,30 @@ export default function SalesPage() {
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="customerName">Customer Social Name</Label>
+                    <RequiredLabel htmlFor="customerName">Customer Social Name</RequiredLabel>
                     <Input
                       id="customerName"
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
                       placeholder="E.g. John Doe Facebook"
-                      required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="transactionName">Transaction Name</Label>
+                    <RequiredLabel htmlFor="customerEmail" required>Customer Email</RequiredLabel>
+                    <Input
+                      id="customerEmail"
+                      type="email"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      placeholder="john.doe@example.com"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <RequiredLabel htmlFor="transactionName" required>Transaction Name</RequiredLabel>
                     <Input
                       id="transactionName"
                       value={transactionName}
@@ -322,11 +515,8 @@ export default function SalesPage() {
                       required
                     />
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="method">Transaction Method</Label>
+                    <RequiredLabel htmlFor="method" required>Transaction Method</RequiredLabel>
                     <Select
                       value={transactionMethod}
                       onValueChange={(val: "Kpay" | "Aya") => setTransactionMethod(val)}
@@ -340,8 +530,11 @@ export default function SalesPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="date">Date</Label>
+                    <RequiredLabel htmlFor="date" required>Date</RequiredLabel>
                     <Input
                       id="date"
                       type="date"
@@ -354,7 +547,7 @@ export default function SalesPage() {
 
                 <div className="space-y-4 border-t border-border pt-4">
                   <div className="flex justify-between items-center">
-                    <Label className="text-sm font-bold">Products Sold</Label>
+                    <RequiredLabel required>Products Sold</RequiredLabel>
                     <Button
                       type="button"
                       variant="outline"
@@ -376,7 +569,7 @@ export default function SalesPage() {
                       {saleItems.map((item, idx) => (
                         <div key={idx} className="flex flex-col sm:flex-row gap-2 items-start sm:items-end border-b border-border pb-3 sm:border-none sm:pb-0">
                           <div className="flex-1 w-full space-y-1 sm:space-y-0">
-                            <Label className="sm:hidden text-xs text-muted-foreground">Product</Label>
+                            <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Product</RequiredLabel>
                             <Select
                               value={item.productId}
                               onValueChange={(val) => handleProductSelect(idx, val)}
@@ -387,7 +580,7 @@ export default function SalesPage() {
                               <SelectContent>
                                 {productsCatalog.map((prod) => (
                                   <SelectItem key={prod.id} value={prod.id}>
-                                    {prod.name} (${prod.price.toFixed(2)})
+                                    {prod.name}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -396,7 +589,7 @@ export default function SalesPage() {
                           
                           <div className="w-full sm:w-24 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
                             <div className="space-y-1 sm:space-y-0">
-                              <Label className="sm:hidden text-xs text-muted-foreground">Price</Label>
+                              <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Price</RequiredLabel>
                               <Input
                                 type="number"
                                 step="0.01"
@@ -410,7 +603,7 @@ export default function SalesPage() {
 
                           <div className="w-full sm:w-20 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
                             <div className="space-y-1 sm:space-y-0">
-                              <Label className="sm:hidden text-xs text-muted-foreground">Qty</Label>
+                              <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Qty</RequiredLabel>
                               <Input
                                 type="number"
                                 min="1"
@@ -450,7 +643,7 @@ export default function SalesPage() {
                 </div>
 
                 <DialogFooter className="pt-4 gap-2">
-                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
+                  <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={submitting || productsCatalog.length === 0}>
@@ -484,6 +677,7 @@ export default function SalesPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Customer</TableHead>
+                    <TableHead>Email</TableHead>
                     <TableHead>Transaction</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead className="text-right">Total Amount</TableHead>
@@ -497,7 +691,8 @@ export default function SalesPage() {
                   {sales.map((sale) => (
                     <TableRow key={sale.id}>
                       <TableCell className="whitespace-nowrap">{sale.date}</TableCell>
-                      <TableCell className="font-medium">{sale.customerSocialName}</TableCell>
+                      <TableCell className="font-medium">{sale.customerSocialName || "-"}</TableCell>
+                      <TableCell>{sale.customerEmail}</TableCell>
                       <TableCell>{sale.transactionName}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="font-sans font-normal border-border bg-muted/30">
@@ -530,6 +725,16 @@ export default function SalesPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
+                          {(profile?.role === "admin" || !sale.approved) && (
+                            <Button
+                              onClick={() => handleOpenEdit(sale)}
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8 text-primary border-border"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          )}
                           {profile?.role === "admin" && (
                             <>
                               {!sale.approved && (
@@ -543,7 +748,7 @@ export default function SalesPage() {
                                 </Button>
                               )}
                               <Button
-                                onClick={() => handleDelete(sale.id)}
+                                onClick={() => triggerDelete(sale.id)}
                                 size="icon"
                                 variant="outline"
                                 className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
@@ -563,13 +768,205 @@ export default function SalesPage() {
         </Card>
       </div>
 
+      {/* Edit Sale Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Sale Record</DialogTitle>
+            <DialogDescription>
+              Update the details of this sale.
+            </DialogDescription>
+          </DialogHeader>
+          {editingSale && (
+            <form onSubmit={handleUpdateSale} className="space-y-4 py-4">
+              {editFormError && (
+                <Alert variant="destructive">
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>{editFormError}</AlertDescription>
+                </Alert>
+              )}
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editCustomerName">Customer Social Name</RequiredLabel>
+                  <Input
+                    id="editCustomerName"
+                    value={editCustomerName}
+                    onChange={(e) => setEditCustomerName(e.target.value)}
+                    placeholder="E.g. John Doe Facebook"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editCustomerEmail" required>Customer Email</RequiredLabel>
+                  <Input
+                    id="editCustomerEmail"
+                    type="email"
+                    value={editCustomerEmail}
+                    onChange={(e) => setEditCustomerEmail(e.target.value)}
+                    placeholder="john.doe@example.com"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editTransactionName" required>Transaction Name</RequiredLabel>
+                  <Input
+                    id="editTransactionName"
+                    value={editTransactionName}
+                    onChange={(e) => setEditTransactionName(e.target.value)}
+                    placeholder="E.g. Invoice 12456"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editMethod" required>Transaction Method</RequiredLabel>
+                  <Select
+                    value={editTransactionMethod}
+                    onValueChange={(val: "Kpay" | "Aya") => setEditTransactionMethod(val)}
+                  >
+                    <SelectTrigger id="editMethod">
+                      <SelectValue placeholder="Select Method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Kpay">Kpay</SelectItem>
+                      <SelectItem value="Aya">Aya</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="editDate" required>Date</RequiredLabel>
+                  <Input
+                    id="editDate"
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4 border-t border-border pt-4">
+                <div className="flex justify-between items-center">
+                  <RequiredLabel required>Products Sold</RequiredLabel>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddEditItemRow}
+                    className="text-xs h-7 px-2"
+                    disabled={productsCatalog.length === 0}
+                  >
+                    <Plus className="h-3 w-3 mr-1" /> Add Product
+                  </Button>
+                </div>
+
+                {productsCatalog.length === 0 ? (
+                  <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
+                    No approved products exist. Please add products and approve them first.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {editSaleItems.map((item, idx) => (
+                      <div key={idx} className="flex flex-col sm:flex-row gap-2 items-start sm:items-end border-b border-border pb-3 sm:border-none sm:pb-0">
+                        <div className="flex-1 w-full space-y-1 sm:space-y-0">
+                          <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Product</RequiredLabel>
+                          <Select
+                            value={item.productId}
+                            onValueChange={(val) => handleEditProductSelect(idx, val)}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select Product" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {productsCatalog.map((prod) => (
+                                <SelectItem key={prod.id} value={prod.id}>
+                                  {prod.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="w-full sm:w-24 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
+                          <div className="space-y-1 sm:space-y-0">
+                            <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Price</RequiredLabel>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00"
+                              value={item.price}
+                              onChange={(e) => handleEditItemChange(idx, "price", e.target.value)}
+                              className="w-full text-right"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="w-full sm:w-20 grid grid-cols-2 sm:flex sm:flex-col gap-2 sm:gap-0">
+                          <div className="space-y-1 sm:space-y-0">
+                            <RequiredLabel className="sm:hidden text-xs text-muted-foreground">Qty</RequiredLabel>
+                            <Input
+                              type="number"
+                              min="1"
+                              placeholder="1"
+                              value={item.quantity}
+                              onChange={(e) => handleEditItemChange(idx, "quantity", e.target.value)}
+                              className="w-full text-right"
+                            />
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveEditItemRow(idx)}
+                          className="text-destructive h-9 w-9 self-end"
+                          disabled={editSaleItems.length === 1}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col items-end border-t border-border pt-4 text-sm font-sans space-y-1">
+                <div className="flex gap-4">
+                  <span className="text-muted-foreground">Subtotal:</span>
+                  <span className="font-bold">${editCalculatedSubtotal.toFixed(2)}</span>
+                </div>
+                <div className="flex gap-4 text-base font-bold">
+                  <span className="text-foreground">Total:</span>
+                  <span className="text-primary">${editCalculatedTotal.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <DialogFooter className="pt-4 gap-2">
+                <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={updating}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={updating || productsCatalog.length === 0}>
+                  {updating ? "Saving..." : "Save Changes"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Sale Detail Viewer Modal */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
         <DialogContent className="sm:max-w-[450px]">
           <DialogHeader>
             <DialogTitle>Sale Details</DialogTitle>
             <DialogDescription>
-              Full breakdown for {selectedSale?.customerSocialName}
+              Full breakdown for {selectedSale?.customerSocialName || "No Name"}
             </DialogDescription>
           </DialogHeader>
           
@@ -580,8 +977,11 @@ export default function SalesPage() {
                 <span className="text-right font-medium">{selectedSale.date}</span>
                 
                 <span className="text-muted-foreground">Customer:</span>
-                <span className="text-right font-medium">{selectedSale.customerSocialName}</span>
+                <span className="text-right font-medium">{selectedSale.customerSocialName || "-"}</span>
                 
+                <span className="text-muted-foreground">Customer Email:</span>
+                <span className="text-right font-medium">{selectedSale.customerEmail}</span>
+
                 <span className="text-muted-foreground">Transaction Name:</span>
                 <span className="text-right font-medium">{selectedSale.transactionName}</span>
                 
@@ -622,6 +1022,16 @@ export default function SalesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Custom ConfirmDialog for delete action */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete Sale Record"
+        description="Are you sure you want to permanently delete this sale record? This action cannot be undone."
+        onConfirm={handleConfirmDelete}
+        loading={deleting}
+      />
     </NavLayout>
   );
 }
