@@ -655,7 +655,6 @@ export default function DashboardPage() {
                           Shared Sales
                         </CardTitle>
                       </div>
-                      <TrendingUp className="h-4 w-4 text-green-500/70" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
@@ -685,7 +684,6 @@ export default function DashboardPage() {
                           Private Sales
                         </CardTitle>
                       </div>
-                      <TrendingUp className="h-4 w-4 text-green-600/50" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
@@ -715,7 +713,6 @@ export default function DashboardPage() {
                           Shared Expenses
                         </CardTitle>
                       </div>
-                      <Wallet className="h-4 w-4 text-red-500/70" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
@@ -745,7 +742,6 @@ export default function DashboardPage() {
                           Private Expenses
                         </CardTitle>
                       </div>
-                      <Wallet className="h-4 w-4 text-red-600/50" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
@@ -775,7 +771,6 @@ export default function DashboardPage() {
                           Shared Revenues
                         </CardTitle>
                       </div>
-                      <Coins className="h-4 w-4 text-violet-500" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
@@ -805,7 +800,6 @@ export default function DashboardPage() {
                           Private Revenues
                         </CardTitle>
                       </div>
-                      <Coins className="h-4 w-4 text-fuchsia-500" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
@@ -835,7 +829,6 @@ export default function DashboardPage() {
                           Shared Customers
                         </CardTitle>
                       </div>
-                      <Users className="h-4 w-4 text-blue-500/70" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
@@ -865,7 +858,6 @@ export default function DashboardPage() {
                           Private Customers
                         </CardTitle>
                       </div>
-                      <Users className="h-4 w-4 text-blue-600/50" />
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
