@@ -42,6 +42,8 @@ import {
   Wallet,
   Lock,
   Globe,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -100,6 +102,149 @@ interface Expense {
   shared?: boolean;
   createdAt: string;
 }
+
+interface CompareBadgeProps {
+  current: number;
+  previous: number;
+  isCurrency?: boolean;
+  isExpense?: boolean;
+}
+
+function CompareBadge({
+  current,
+  previous,
+  isCurrency = true,
+  isExpense = false,
+}: CompareBadgeProps) {
+  const diff = current - previous;
+
+  // Percent calculation
+  let percent = 0;
+  if (previous !== 0) {
+    percent = (diff / previous) * 100;
+  } else if (current !== 0) {
+    percent = current > 0 ? 100 : -100;
+  }
+
+  if (diff === 0) {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground bg-muted/40 rounded-md">
+        0%
+      </span>
+    );
+  }
+
+  const isPositiveChange = diff > 0;
+  // For expenses, decrease is good/green, increase is bad/red
+  const isFavorable = isExpense ? !isPositiveChange : isPositiveChange;
+
+  const colorClass = isFavorable
+    ? "text-emerald-600 dark:text-emerald-400"
+    : "text-rose-600 dark:text-rose-400";
+
+  const Icon = isPositiveChange ? ArrowUp : ArrowDown;
+  const prefix = isPositiveChange ? "+" : "-";
+
+  const formattedDiff = isCurrency
+    ? `${Math.abs(diff).toLocaleString()} Ks`
+    : `${Math.abs(diff).toLocaleString()}`;
+
+  const formattedPercent = `(${isPositiveChange ? "+" : "-"}${Math.abs(percent).toFixed(1)}%)`;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 text-xs font-medium rounded-full transition-all duration-300 ${colorClass}`}
+    >
+      <Icon className="h-3 w-3 sm:h-3.5 sm:w-3.5 stroke-[2.5]" />
+      <span>
+        {prefix}
+        {formattedDiff} {formattedPercent}
+      </span>
+    </span>
+  );
+}
+
+const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
+  // Distinct Customers (calculated using sale.transactionName)
+  const customerSet = new Set<string>();
+  const sharedCustomerSet = new Set<string>();
+  const privateCustomerSet = new Set<string>();
+
+  let totalSalesVal = 0;
+  let sharedSalesVal = 0;
+  let privateSalesVal = 0;
+  filteredSales.forEach((sale) => {
+    if (sale.transactionName) {
+      const cName = sale.transactionName.trim().toLowerCase();
+      customerSet.add(cName);
+      if (sale.shared === true) {
+        sharedCustomerSet.add(cName);
+      } else {
+        privateCustomerSet.add(cName);
+      }
+    }
+    totalSalesVal += sale.total;
+    if (sale.shared === true) {
+      sharedSalesVal += sale.total;
+    } else {
+      privateSalesVal += sale.total;
+    }
+  });
+
+  let totalExpensesVal = 0;
+  let sharedExpensesVal = 0;
+  let privateExpensesVal = 0;
+  filteredExpenses.forEach((exp) => {
+    totalExpensesVal += exp.amount;
+    if (exp.shared === true) {
+      sharedExpensesVal += exp.amount;
+    } else {
+      privateExpensesVal += exp.amount;
+    }
+  });
+
+  const revenues = totalSalesVal - totalExpensesVal;
+  const sharedRevenues = sharedSalesVal - sharedExpensesVal;
+  const privateRevenues = privateSalesVal - privateExpensesVal;
+
+  // Most Selling Products
+  const productCounts: {
+    [id: string]: { name: string; quantity: number; revenue: number };
+  } = {};
+  filteredSales.forEach((sale) => {
+    sale.products.forEach((p) => {
+      if (!productCounts[p.productId]) {
+        productCounts[p.productId] = {
+          name: p.name,
+          quantity: 0,
+          revenue: 0,
+        };
+      }
+      productCounts[p.productId].quantity += p.quantity;
+      productCounts[p.productId].revenue += p.price * p.quantity;
+    });
+  });
+
+  const topProducts = Object.values(productCounts)
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 5);
+
+  return {
+    customerCount: customerSet.size,
+    sharedCustomerCount: sharedCustomerSet.size,
+    privateCustomerCount: privateCustomerSet.size,
+    totalSales: totalSalesVal,
+    sharedSales: sharedSalesVal,
+    privateSales: privateSalesVal,
+    totalExpenses: totalExpensesVal,
+    sharedExpenses: sharedExpensesVal,
+    privateExpenses: privateExpensesVal,
+    revenues,
+    sharedRevenues,
+    privateRevenues,
+    topProducts,
+  };
+};
 
 type FilterType = "week" | "month" | "90days" | "1year" | "custom";
 
@@ -235,87 +380,37 @@ export default function DashboardPage() {
   // Compute Metrics
   const metrics = useMemo(() => {
     const { filteredSales, filteredExpenses } = filteredData;
-
-    // Distinct Customers (calculated using sale.transactionName)
-    const customerSet = new Set<string>();
-    const sharedCustomerSet = new Set<string>();
-    const privateCustomerSet = new Set<string>();
-
-    let totalSalesVal = 0;
-    let sharedSalesVal = 0;
-    let privateSalesVal = 0;
-    filteredSales.forEach((sale) => {
-      if (sale.transactionName) {
-        const cName = sale.transactionName.trim().toLowerCase();
-        customerSet.add(cName);
-        if (sale.shared === true) {
-          sharedCustomerSet.add(cName);
-        } else {
-          privateCustomerSet.add(cName);
-        }
-      }
-      totalSalesVal += sale.total;
-      if (sale.shared === true) {
-        sharedSalesVal += sale.total;
-      } else {
-        privateSalesVal += sale.total;
-      }
-    });
-
-    let totalExpensesVal = 0;
-    let sharedExpensesVal = 0;
-    let privateExpensesVal = 0;
-    filteredExpenses.forEach((exp) => {
-      totalExpensesVal += exp.amount;
-      if (exp.shared === true) {
-        sharedExpensesVal += exp.amount;
-      } else {
-        privateExpensesVal += exp.amount;
-      }
-    });
-
-    const revenues = totalSalesVal - totalExpensesVal;
-    const sharedRevenues = sharedSalesVal - sharedExpensesVal;
-    const privateRevenues = privateSalesVal - privateExpensesVal;
-
-    // Most Selling Products
-    const productCounts: {
-      [id: string]: { name: string; quantity: number; revenue: number };
-    } = {};
-    filteredSales.forEach((sale) => {
-      sale.products.forEach((p) => {
-        if (!productCounts[p.productId]) {
-          productCounts[p.productId] = {
-            name: p.name,
-            quantity: 0,
-            revenue: 0,
-          };
-        }
-        productCounts[p.productId].quantity += p.quantity;
-        productCounts[p.productId].revenue += p.price * p.quantity;
-      });
-    });
-
-    const topProducts = Object.values(productCounts)
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 5);
-
-    return {
-      customerCount: customerSet.size,
-      sharedCustomerCount: sharedCustomerSet.size,
-      privateCustomerCount: privateCustomerSet.size,
-      totalSales: totalSalesVal,
-      sharedSales: sharedSalesVal,
-      privateSales: privateSalesVal,
-      totalExpenses: totalExpensesVal,
-      sharedExpenses: sharedExpensesVal,
-      privateExpenses: privateExpensesVal,
-      revenues,
-      sharedRevenues,
-      privateRevenues,
-      topProducts,
-    };
+    return computeMetrics(filteredSales, filteredExpenses);
   }, [filteredData]);
+
+  // Filter lists based on date range for previous period
+  const previousFilteredData = useMemo(() => {
+    const { start, end } = dateRange;
+    const durationMs = end.getTime() - start.getTime() + 1;
+    const prevEnd = new Date(start.getTime() - 1);
+    const prevStart = new Date(prevEnd.getTime() - durationMs + 1);
+
+    const prevFilteredSales = sales.filter((sale) => {
+      const sDate = new Date(sale.date);
+      return sDate >= prevStart && sDate <= prevEnd;
+    });
+
+    const prevFilteredExpenses = expenses.filter((expense) => {
+      const eDate = new Date(expense.date);
+      return eDate >= prevStart && eDate <= prevEnd;
+    });
+
+    return { prevFilteredSales, prevFilteredExpenses };
+  }, [sales, expenses, dateRange]);
+
+  // Compute Previous Metrics
+  const prevMetrics = useMemo(() => {
+    const { prevFilteredSales, prevFilteredExpenses } = previousFilteredData;
+    return computeMetrics(prevFilteredSales, prevFilteredExpenses);
+  }, [previousFilteredData]);
+
+  const showCompare =
+    filter !== "custom" || (startDate !== "" && endDate !== "");
 
   // Format chart data by day / date
   const chartData = useMemo(() => {
@@ -390,7 +485,6 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-center gap-3">
             {filter === "custom" && (
               <div className="flex items-center gap-2 border border-border rounded px-2 py-1 bg-card">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
                 <Input
                   type="date"
                   value={startDate}
@@ -439,9 +533,19 @@ export default function DashboardPage() {
                   </CardTitle>
                   <TrendingUp className="h-4 w-4 text-green-500" />
                 </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold font-sans">
-                    Ks {metrics.totalSales.toLocaleString()}
+                <CardContent className="space-y-1.5">
+                  <div className="flex flex-col items-baseline gap-2">
+                    <span className="text-2xl font-bold font-sans">
+                      Ks {metrics.totalSales.toLocaleString()}
+                    </span>
+                    {showCompare && (
+                      <CompareBadge
+                        current={metrics.totalSales}
+                        previous={prevMetrics.totalSales}
+                        isCurrency={true}
+                        isExpense={false}
+                      />
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground font-sans">
                     In selected period
@@ -456,9 +560,19 @@ export default function DashboardPage() {
                   </CardTitle>
                   <Wallet className="h-4 w-4 text-red-500" />
                 </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold font-sans">
-                    Ks {metrics.totalExpenses.toLocaleString()}
+                <CardContent className="space-y-1.5">
+                  <div className="flex flex-col items-baseline gap-2">
+                    <span className="text-2xl font-bold font-sans">
+                      Ks {metrics.totalExpenses.toLocaleString()}
+                    </span>
+                    {showCompare && (
+                      <CompareBadge
+                        current={metrics.totalExpenses}
+                        previous={prevMetrics.totalExpenses}
+                        isCurrency={true}
+                        isExpense={true}
+                      />
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground font-sans font-normal">
                     Operational spends
@@ -475,9 +589,19 @@ export default function DashboardPage() {
                     className={`h-4 w-4 ${metrics.revenues >= 0 ? "text-green-500" : "text-red-500"}`}
                   />
                 </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold font-sans">
-                    Ks {metrics.revenues.toLocaleString()}
+                <CardContent className="space-y-1.5">
+                  <div className="flex flex-col items-baseline gap-2">
+                    <span className="text-2xl font-bold font-sans">
+                      Ks {metrics.revenues.toLocaleString()}
+                    </span>
+                    {showCompare && (
+                      <CompareBadge
+                        current={metrics.revenues}
+                        previous={prevMetrics.revenues}
+                        isCurrency={true}
+                        isExpense={false}
+                      />
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground font-sans">
                     Sales minus spends
@@ -492,9 +616,19 @@ export default function DashboardPage() {
                   </CardTitle>
                   <Users className="h-4 w-4 text-blue-500" />
                 </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold font-sans">
-                    {metrics.customerCount}
+                <CardContent className="space-y-1.5">
+                  <div className="flex flex-col items-baseline gap-2">
+                    <span className="text-2xl font-bold font-sans">
+                      {metrics.customerCount}
+                    </span>
+                    {showCompare && (
+                      <CompareBadge
+                        current={metrics.customerCount}
+                        previous={prevMetrics.customerCount}
+                        isCurrency={false}
+                        isExpense={false}
+                      />
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground font-sans">
                     Distinct buying users
@@ -523,9 +657,19 @@ export default function DashboardPage() {
                       </div>
                       <TrendingUp className="h-4 w-4 text-green-500/70" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        Ks {metrics.sharedSales.toLocaleString()}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          Ks {metrics.sharedSales.toLocaleString()}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.sharedSales}
+                            previous={prevMetrics.sharedSales}
+                            isCurrency={true}
+                            isExpense={false}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Visible to all users
@@ -543,9 +687,19 @@ export default function DashboardPage() {
                       </div>
                       <TrendingUp className="h-4 w-4 text-green-600/50" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        Ks {metrics.privateSales.toLocaleString()}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          Ks {metrics.privateSales.toLocaleString()}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.privateSales}
+                            previous={prevMetrics.privateSales}
+                            isCurrency={true}
+                            isExpense={false}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Private to owner
@@ -563,9 +717,19 @@ export default function DashboardPage() {
                       </div>
                       <Wallet className="h-4 w-4 text-red-500/70" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        Ks {metrics.sharedExpenses.toLocaleString()}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          Ks {metrics.sharedExpenses.toLocaleString()}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.sharedExpenses}
+                            previous={prevMetrics.sharedExpenses}
+                            isCurrency={true}
+                            isExpense={true}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Visible to all users
@@ -583,9 +747,19 @@ export default function DashboardPage() {
                       </div>
                       <Wallet className="h-4 w-4 text-red-600/50" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        Ks {metrics.privateExpenses.toLocaleString()}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          Ks {metrics.privateExpenses.toLocaleString()}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.privateExpenses}
+                            previous={prevMetrics.privateExpenses}
+                            isCurrency={true}
+                            isExpense={true}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Private to owner
@@ -603,9 +777,19 @@ export default function DashboardPage() {
                       </div>
                       <Coins className="h-4 w-4 text-violet-500" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        Ks {metrics.sharedRevenues.toLocaleString()}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          Ks {metrics.sharedRevenues.toLocaleString()}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.sharedRevenues}
+                            previous={prevMetrics.sharedRevenues}
+                            isCurrency={true}
+                            isExpense={false}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Shared sales minus spends
@@ -623,9 +807,19 @@ export default function DashboardPage() {
                       </div>
                       <Coins className="h-4 w-4 text-fuchsia-500" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        Ks {metrics.privateRevenues.toLocaleString()}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          Ks {metrics.privateRevenues.toLocaleString()}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.privateRevenues}
+                            previous={prevMetrics.privateRevenues}
+                            isCurrency={true}
+                            isExpense={false}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Private sales minus spends
@@ -643,9 +837,19 @@ export default function DashboardPage() {
                       </div>
                       <Users className="h-4 w-4 text-blue-500/70" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        {metrics.sharedCustomerCount}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          {metrics.sharedCustomerCount}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.sharedCustomerCount}
+                            previous={prevMetrics.sharedCustomerCount}
+                            isCurrency={false}
+                            isExpense={false}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Customers from shared transactions
@@ -663,9 +867,19 @@ export default function DashboardPage() {
                       </div>
                       <Users className="h-4 w-4 text-blue-600/50" />
                     </CardHeader>
-                    <CardContent>
-                      <div className="text-lg font-bold font-sans">
-                        {metrics.privateCustomerCount}
+                    <CardContent className="space-y-1">
+                      <div className="flex flex-col items-baseline gap-2">
+                        <span className="text-lg font-bold font-sans">
+                          {metrics.privateCustomerCount}
+                        </span>
+                        {showCompare && (
+                          <CompareBadge
+                            current={metrics.privateCustomerCount}
+                            previous={prevMetrics.privateCustomerCount}
+                            isCurrency={false}
+                            isExpense={false}
+                          />
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
                         Customers from private transactions
