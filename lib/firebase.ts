@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -21,11 +21,7 @@ setPersistence(auth, browserLocalPersistence).catch((err) => {
   console.error("Error setting Firebase Auth persistence:", err);
 });
 
-// Initialize Firestore with persistent multi-tab offline cache
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-});
+// Initialize Firestore (no persistent local cache to avoid resume token/listen issues in production)
+const db = getFirestore(app);
 
 export { app, auth, db };
