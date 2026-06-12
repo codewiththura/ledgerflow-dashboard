@@ -9,6 +9,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { Account, AccountAdjustment } from "@/lib/accounts-db";
 import { useAuth } from "@/context/auth-context";
 import { NavLayout } from "@/components/nav-layout";
 import {
@@ -44,6 +45,10 @@ import {
   Globe,
   ArrowUp,
   ArrowDown,
+  Eye,
+  EyeOff,
+  ArrowUpRight,
+  Banknote,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -55,6 +60,9 @@ import {
   Legend,
   LineChart,
   Line,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 
 const formatDateLabel = (label: any): any => {
@@ -83,7 +91,7 @@ interface Sale {
   id: string;
   customerSocialName: string;
   transactionName: string;
-  transactionMethod: "Kpay" | "Aya";
+  transactionMethod: string;
   date: string;
   products: ProductItem[];
   subtotal: number;
@@ -101,6 +109,8 @@ interface Expense {
   approved: boolean;
   shared?: boolean;
   createdAt: string;
+  expenseType?: "business" | "personal";
+  note?: string;
 }
 
 interface CompareBadgeProps {
@@ -194,12 +204,34 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
   let totalExpensesVal = 0;
   let sharedExpensesVal = 0;
   let privateExpensesVal = 0;
+  let businessExpensesVal = 0;
+  let personalExpensesVal = 0;
+  let sharedBusinessExpensesVal = 0;
+  let sharedPersonalExpensesVal = 0;
+  let privateBusinessExpensesVal = 0;
+  let privatePersonalExpensesVal = 0;
   filteredExpenses.forEach((exp) => {
     totalExpensesVal += exp.amount;
+    const isBusiness = exp.expenseType !== "personal";
+    if (isBusiness) {
+      businessExpensesVal += exp.amount;
+    } else {
+      personalExpensesVal += exp.amount;
+    }
     if (exp.shared === true) {
       sharedExpensesVal += exp.amount;
+      if (isBusiness) {
+        sharedBusinessExpensesVal += exp.amount;
+      } else {
+        sharedPersonalExpensesVal += exp.amount;
+      }
     } else {
       privateExpensesVal += exp.amount;
+      if (isBusiness) {
+        privateBusinessExpensesVal += exp.amount;
+      } else {
+        privatePersonalExpensesVal += exp.amount;
+      }
     }
   });
 
@@ -239,6 +271,12 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
     totalExpenses: totalExpensesVal,
     sharedExpenses: sharedExpensesVal,
     privateExpenses: privateExpensesVal,
+    businessExpenses: businessExpensesVal,
+    personalExpenses: personalExpensesVal,
+    sharedBusinessExpenses: sharedBusinessExpensesVal,
+    sharedPersonalExpenses: sharedPersonalExpensesVal,
+    privateBusinessExpenses: privateBusinessExpensesVal,
+    privatePersonalExpenses: privatePersonalExpensesVal,
     revenues,
     sharedRevenues,
     privateRevenues,
@@ -254,6 +292,12 @@ export default function DashboardPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loadingSales, setLoadingSales] = useState(true);
   const [loadingExpenses, setLoadingExpenses] = useState(true);
+
+  // Admin-only: accounts and adjustments
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [adjustments, setAdjustments] = useState<AccountAdjustment[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [loadingAdjustments, setLoadingAdjustments] = useState(true);
 
   // Filter State
   const [filter, setFilter] = useState<FilterType>("month");
@@ -320,9 +364,60 @@ export default function DashboardPage() {
       },
     );
 
+    // Admin-only: Accounts subscription
+    let unsubAccounts: (() => void) | null = null;
+    let unsubAdjustments: (() => void) | null = null;
+
+    if (profile.role === "admin") {
+      const accountsQuery = query(
+        collection(db, "accounts"),
+        orderBy("name", "asc"),
+      );
+      unsubAccounts = onSnapshot(
+        accountsQuery,
+        (snapshot) => {
+          const items: Account[] = [];
+          snapshot.forEach((doc) => {
+            items.push({ id: doc.id, ...doc.data() } as Account);
+          });
+          setAccounts(items);
+          setLoadingAccounts(false);
+        },
+        (err) => {
+          console.error("Accounts snapshot error:", err);
+          setLoadingAccounts(false);
+        },
+      );
+
+      const adjustmentsQuery = query(
+        collection(db, "account_adjustments"),
+        orderBy("createdAt", "desc"),
+      );
+      unsubAdjustments = onSnapshot(
+        adjustmentsQuery,
+        (snapshot) => {
+          const items: AccountAdjustment[] = [];
+          snapshot.forEach((doc) => {
+            items.push({ id: doc.id, ...doc.data() } as AccountAdjustment);
+          });
+          setAdjustments(items);
+          setLoadingAdjustments(false);
+        },
+        (err) => {
+          console.error("Adjustments snapshot error:", err);
+          setLoadingAdjustments(false);
+        },
+      );
+    } else {
+      setLoadingAccounts(false);
+      setLoadingAdjustments(false);
+    }
+
     return () => {
       unsubSales();
       unsubExpenses();
+      unsubAccounts?.();
+      unsubAdjustments?.();
     };
   }, [profile]);
 
@@ -423,6 +518,7 @@ export default function DashboardPage() {
         sharedSales: number;
         privateSales: number;
         sharedExpenses: number;
+        privateExpenses: number;
       };
     } = {};
 
@@ -436,6 +532,7 @@ export default function DashboardPage() {
           sharedSales: 0,
           privateSales: 0,
           sharedExpenses: 0,
+          privateExpenses: 0,
         };
       }
       dailyMap[sale.date].sales += sale.total;
@@ -455,18 +552,46 @@ export default function DashboardPage() {
           sharedSales: 0,
           privateSales: 0,
           sharedExpenses: 0,
+          privateExpenses: 0,
         };
       }
       dailyMap[exp.date].expenses += exp.amount;
       if (exp.shared === true) {
         dailyMap[exp.date].sharedExpenses += exp.amount;
+      } else {
+        dailyMap[exp.date].privateExpenses += exp.amount;
       }
     });
 
     return Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredData]);
 
-  const loading = loadingSales || loadingExpenses;
+  // Admin-only: total available balance from all accounts
+  const totalAvailableBalance = useMemo(() => {
+    return accounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
+  }, [accounts]);
+
+  // Admin-only: total external adjustments (cash-in minus cash-out)
+  const totalAdjustments = useMemo(() => {
+    return adjustments.reduce((sum, adj) => {
+      return sum + (adj.type === "in" ? adj.amount : -adj.amount);
+    }, 0);
+  }, [adjustments]);
+
+  const totalAdjustmentCashIn = useMemo(() => {
+    return adjustments.reduce((sum, adj) => {
+      return sum + (adj.type === "in" ? adj.amount : 0);
+    }, 0);
+  }, [adjustments]);
+
+  const totalAdjustmentCashOut = useMemo(() => {
+    return adjustments.reduce((sum, adj) => {
+      return sum + (adj.type === "out" ? adj.amount : 0);
+    }, 0);
+  }, [adjustments]);
+
+  const loading =
+    loadingSales || loadingExpenses || loadingAccounts || loadingAdjustments;
 
   return (
     <NavLayout>
@@ -574,16 +699,23 @@ export default function DashboardPage() {
                       />
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground font-sans font-normal">
-                    Operational spends
-                  </p>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground font-sans">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-blue-500 inline-block" />
+                      Biz: Ks {metrics.businessExpenses.toLocaleString()}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" />
+                      Personal: Ks {metrics.personalExpenses.toLocaleString()}
+                    </span>
+                  </div>
                 </CardContent>
               </Card>
 
               <Card className="border-border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <CardTitle className="text-sm font-medium font-sans">
-                    Net Revenues
+                    Net Profit
                   </CardTitle>
                   <Coins
                     className={`h-4 w-4 ${metrics.revenues >= 0 ? "text-green-500" : "text-red-500"}`}
@@ -609,40 +741,61 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                  <CardTitle className="text-sm font-medium font-sans">
-                    Customers Count
-                  </CardTitle>
-                  <Users className="h-4 w-4 text-blue-500" />
-                </CardHeader>
-                <CardContent className="space-y-1.5">
-                  <div className="flex flex-col items-baseline gap-2">
-                    <span className="text-2xl font-bold font-sans">
-                      {metrics.customerCount}
-                    </span>
-                    {showCompare && (
-                      <CompareBadge
-                        current={metrics.customerCount}
-                        previous={prevMetrics.customerCount}
-                        isCurrency={false}
-                        isExpense={false}
-                      />
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground font-sans">
-                    Distinct buying users
-                  </p>
-                </CardContent>
-              </Card>
+              {profile?.role === "admin" ? (
+                <Card className="border-border shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                    <CardTitle className="text-sm font-medium font-sans">
+                      Total Available Balance
+                    </CardTitle>
+                    <Banknote className="h-4 w-4 text-emerald-500" />
+                  </CardHeader>
+                  <CardContent className="space-y-1.5">
+                    <div className="flex flex-col items-baseline gap-2">
+                      <span className="text-2xl font-bold font-sans">
+                        Ks {totalAvailableBalance.toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground font-sans">
+                      Sum of all account balances
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="border-border shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                    <CardTitle className="text-sm font-medium font-sans">
+                      Customers Count
+                    </CardTitle>
+                    <Users className="h-4 w-4 text-blue-500" />
+                  </CardHeader>
+                  <CardContent className="space-y-1.5">
+                    <div className="flex flex-col items-baseline gap-2">
+                      <span className="text-2xl font-bold font-sans">
+                        {metrics.customerCount}
+                      </span>
+                      {showCompare && (
+                        <CompareBadge
+                          current={metrics.customerCount}
+                          previous={prevMetrics.customerCount}
+                          isCurrency={false}
+                          isExpense={false}
+                        />
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground font-sans">
+                      Distinct buying users
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
             {/* Admin-only Detailed Breakdown Grid */}
             {profile?.role === "admin" && (
               <div className="space-y-2 mt-4">
                 <div className="flex items-center gap-2 px-1">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-sans">
-                    Admin Details (Shared vs Private)
+                  <span className="text-xs text-muted-foreground tracking-wider font-sans">
+                    Admin Details (Public vs Personal)
                   </span>
                   <div className="h-px flex-1 bg-border" />
                 </div>
@@ -652,7 +805,7 @@ export default function DashboardPage() {
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Shared Sales
+                          Public Sales
                         </CardTitle>
                       </div>
                     </CardHeader>
@@ -681,7 +834,7 @@ export default function DashboardPage() {
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Private Sales
+                          Personal Sales
                         </CardTitle>
                       </div>
                     </CardHeader>
@@ -710,7 +863,7 @@ export default function DashboardPage() {
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Shared Expenses
+                          Public Expenses
                         </CardTitle>
                       </div>
                     </CardHeader>
@@ -728,9 +881,18 @@ export default function DashboardPage() {
                           />
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground font-sans font-normal">
-                        Visible to all users
-                      </p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 inline-block" />
+                          Biz: Ks{" "}
+                          {metrics.sharedBusinessExpenses.toLocaleString()}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 inline-block" />
+                          Personal: Ks{" "}
+                          {metrics.sharedPersonalExpenses.toLocaleString()}
+                        </span>
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -739,7 +901,7 @@ export default function DashboardPage() {
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Private Expenses
+                          Personal Expenses
                         </CardTitle>
                       </div>
                     </CardHeader>
@@ -757,9 +919,18 @@ export default function DashboardPage() {
                           />
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground font-sans font-normal">
-                        Private to owner
-                      </p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 inline-block" />
+                          Biz: Ks{" "}
+                          {metrics.privateBusinessExpenses.toLocaleString()}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 inline-block" />
+                          Personal: Ks{" "}
+                          {metrics.privatePersonalExpenses.toLocaleString()}
+                        </span>
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -768,7 +939,7 @@ export default function DashboardPage() {
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Shared Revenues
+                          Public Net Profit
                         </CardTitle>
                       </div>
                     </CardHeader>
@@ -787,7 +958,7 @@ export default function DashboardPage() {
                         )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
-                        Shared sales minus spends
+                        Public sales minus spends
                       </p>
                     </CardContent>
                   </Card>
@@ -797,7 +968,7 @@ export default function DashboardPage() {
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Private Revenues
+                          Personal Net Profit (Remaining Balance)
                         </CardTitle>
                       </div>
                     </CardHeader>
@@ -816,66 +987,72 @@ export default function DashboardPage() {
                         )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
-                        Private sales minus spends
+                        Personal sales minus expenses
                       </p>
                     </CardContent>
                   </Card>
 
-                  {/* Shared Customers (Mobile order-7, Desktop lg:order-4) */}
+                  {/* Hidden vs Visible Ratio (Mobile order-7, Desktop lg:order-4) */}
                   <Card className="col-span-1 order-7 lg:order-4 border-border shadow-sm bg-muted/10">
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Shared Customers
+                          Public vs Hidden Ratio
                         </CardTitle>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-1">
-                      <div className="flex flex-col items-baseline gap-2">
-                        <span className="text-lg font-bold font-sans">
-                          {metrics.sharedCustomerCount}
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5">
+                          <Eye className="h-3.5 w-3.5 text-emerald-500" />
+                          <span className="text-lg font-bold font-sans">
+                            {metrics.sharedCustomerCount}
+                          </span>
+                        </div>
+                        <span className="text-muted-foreground font-sans text-sm">
+                          :
                         </span>
-                        {showCompare && (
-                          <CompareBadge
-                            current={metrics.sharedCustomerCount}
-                            previous={prevMetrics.sharedCustomerCount}
-                            isCurrency={false}
-                            isExpense={false}
-                          />
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          <EyeOff className="h-3.5 w-3.5 text-rose-400" />
+                          <span className="text-lg font-bold font-sans">
+                            {metrics.privateCustomerCount}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
-                        Customers from shared transactions
+                        Public vs Hidden customer records
                       </p>
                     </CardContent>
                   </Card>
 
-                  {/* Private Customers (Mobile order-8, Desktop lg:order-8) */}
+                  {/* Total Adjustments / External Cash-in (Mobile order-8, Desktop lg:order-8) */}
                   <Card className="col-span-1 order-8 lg:order-8 border-border shadow-sm bg-muted/10">
                     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                       <div className="flex items-center gap-1.5">
                         <CardTitle className="text-xs font-medium font-sans text-muted-foreground">
-                          Private Customers
+                          Total Adjustments / External Cash-in
                         </CardTitle>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-1">
                       <div className="flex flex-col items-baseline gap-2">
-                        <span className="text-lg font-bold font-sans">
-                          {metrics.privateCustomerCount}
+                        <span
+                          className={`text-lg font-bold font-sans ${totalAdjustments >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                        >
+                          {totalAdjustments >= 0 ? "+" : ""}Ks{" "}
+                          {totalAdjustments.toLocaleString()}
                         </span>
-                        {showCompare && (
-                          <CompareBadge
-                            current={metrics.privateCustomerCount}
-                            previous={prevMetrics.privateCustomerCount}
-                            isCurrency={false}
-                            isExpense={false}
-                          />
-                        )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground font-sans font-normal">
-                        Customers from private transactions
-                      </p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+                        <span className="inline-flex items-center gap-1">
+                          <ArrowUpRight className="h-3 w-3 text-emerald-500" />
+                          In: Ks {totalAdjustmentCashIn.toLocaleString()}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <ArrowDown className="h-3 w-3 text-rose-500" />
+                          Out: Ks {totalAdjustmentCashOut.toLocaleString()}
+                        </span>
+                      </div>
                     </CardContent>
                   </Card>
                 </div>
@@ -891,7 +1068,7 @@ export default function DashboardPage() {
                     Revenue Trend
                   </CardTitle>
                   <CardDescription className="text-xs font-sans">
-                    Daily sales vs expenses breakdown.
+                    Total daily sales vs expenses breakdown.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px] pl-0">
@@ -932,13 +1109,13 @@ export default function DashboardPage() {
                         <Legend wrapperStyle={{ fontSize: 11 }} />
                         <Bar
                           dataKey="sales"
-                          name="Sales"
+                          name="Total Sales"
                           fill="#10B981"
                           radius={[4, 4, 0, 0]}
                         />
                         <Bar
                           dataKey="expenses"
-                          name="Expenses"
+                          name="Total Expenses"
                           fill="#EF4444"
                           radius={[4, 4, 0, 0]}
                         />
@@ -1007,10 +1184,10 @@ export default function DashboardPage() {
                   <Card className="border-border shadow-sm">
                     <CardHeader>
                       <CardTitle className="text-md font-sans">
-                        Shared Sales vs Private Sales
+                        Public Sales vs Personal Sales
                       </CardTitle>
                       <CardDescription className="text-xs font-sans">
-                        Daily breakdown of public vs private sales.
+                        Daily breakdown of public vs personal sales.
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="h-[300px] pl-0">
@@ -1052,7 +1229,7 @@ export default function DashboardPage() {
                             <Line
                               type="monotone"
                               dataKey="sharedSales"
-                              name="Shared Sales"
+                              name="Public Sales"
                               stroke="#10B981"
                               strokeWidth={2}
                               activeDot={{ r: 6 }}
@@ -1061,7 +1238,7 @@ export default function DashboardPage() {
                             <Line
                               type="monotone"
                               dataKey="privateSales"
-                              name="Private Sales"
+                              name="Personal Sales"
                               stroke="#F59E0B"
                               strokeWidth={2}
                               activeDot={{ r: 6 }}
@@ -1077,7 +1254,7 @@ export default function DashboardPage() {
                   <Card className="border-border shadow-sm">
                     <CardHeader>
                       <CardTitle className="text-md font-sans">
-                        Shared Sales vs Shared Expenses
+                        Public Sales vs Expenses
                       </CardTitle>
                       <CardDescription className="text-xs font-sans">
                         Daily comparison of public sales against public
@@ -1123,7 +1300,7 @@ export default function DashboardPage() {
                             <Line
                               type="monotone"
                               dataKey="sharedSales"
-                              name="Shared Sales"
+                              name="Public Sales"
                               stroke="#10B981"
                               strokeWidth={2}
                               activeDot={{ r: 6 }}
@@ -1132,13 +1309,152 @@ export default function DashboardPage() {
                             <Line
                               type="monotone"
                               dataKey="sharedExpenses"
-                              name="Shared Expenses"
+                              name="Public Expenses"
                               stroke="#EF4444"
                               strokeWidth={2}
                               activeDot={{ r: 6 }}
                               dot={{ r: 3 }}
                             />
                           </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                  {/* Personal Sales vs Personal Expenses Line Chart */}
+                  <Card className="border-border shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-md font-sans">
+                        Personal Sales vs Expenses
+                      </CardTitle>
+                      <CardDescription className="text-xs font-sans">
+                        Daily breakdown of personal (hidden) sales against
+                        expenses.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-[300px] pl-0">
+                      {chartData.length === 0 ? (
+                        <div className="flex h-full items-center justify-center text-muted-foreground text-sm font-sans">
+                          No data to chart.
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                            <XAxis
+                              dataKey="date"
+                              stroke="#888888"
+                              fontSize={11}
+                              tickLine={false}
+                              axisLine={false}
+                              tickFormatter={formatDateLabel}
+                            />
+                            <YAxis
+                              stroke="#888888"
+                              fontSize={11}
+                              tickLine={false}
+                              axisLine={false}
+                              tickFormatter={(value) =>
+                                `Ks ${value.toLocaleString()}`
+                              }
+                            />
+                            <Tooltip
+                              formatter={(value) => [
+                                `Ks ${Number(value).toLocaleString()}`,
+                              ]}
+                              labelFormatter={formatDateLabel}
+                              contentStyle={{
+                                background: "#FFFFFF",
+                                border: "1px solid #E2E8F0",
+                              }}
+                            />
+                            <Legend wrapperStyle={{ fontSize: 11 }} />
+                            <Line
+                              type="monotone"
+                              dataKey="privateSales"
+                              name="Personal Sales"
+                              stroke="#F59E0B"
+                              strokeWidth={2}
+                              activeDot={{ r: 6 }}
+                              dot={{ r: 3 }}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="privateExpenses"
+                              name="Personal Expenses"
+                              stroke="#EF4444"
+                              strokeWidth={2}
+                              activeDot={{ r: 6 }}
+                              dot={{ r: 3 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Expense Breakdown Pie Chart */}
+                  <Card className="border-border shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-md font-sans">
+                        Expense Breakdown
+                      </CardTitle>
+                      <CardDescription className="text-xs font-sans">
+                        Business vs Personal expense distribution.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-[300px]">
+                      {metrics.totalExpenses === 0 ? (
+                        <div className="flex h-full items-center justify-center text-muted-foreground text-sm font-sans">
+                          No expenses in this period.
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={[
+                                {
+                                  name: "Business",
+                                  value: metrics.businessExpenses,
+                                },
+                                {
+                                  name: "Personal",
+                                  value: metrics.personalExpenses,
+                                },
+                              ]}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={100}
+                              paddingAngle={4}
+                              dataKey="value"
+                              label={({ name, percent }) =>
+                                `${name} ${((percent ?? 0) * 100).toFixed(1)}%`
+                              }
+                              labelLine={false}
+                            >
+                              <Cell fill="#3B82F6" />
+                              <Cell fill="#F59E0B" />
+                            </Pie>
+                            <Tooltip
+                              formatter={(value) => [
+                                `Ks ${Number(value).toLocaleString()}`,
+                              ]}
+                              contentStyle={{
+                                background: "#FFFFFF",
+                                border: "1px solid #E2E8F0",
+                              }}
+                            />
+                            <Legend
+                              wrapperStyle={{ fontSize: 12 }}
+                              formatter={(value) => (
+                                <span className="font-sans text-sm">
+                                  {value}
+                                </span>
+                              )}
+                            />
+                          </PieChart>
                         </ResponsiveContainer>
                       )}
                     </CardContent>
