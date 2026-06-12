@@ -29,6 +29,12 @@ import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useFirestorePagination } from "@/hooks/use-firestore-pagination";
 import { PaginationControls } from "@/components/pagination-controls";
+import {
+  createSaleTransaction,
+  updateSaleTransaction,
+  deleteSaleTransaction,
+  initializeDefaultAccounts
+} from "@/lib/accounts-db";
 
 interface ProductItem {
   productId: string;
@@ -43,7 +49,8 @@ interface Sale {
   customerEmail: string;
   customerChannel?: string;
   transactionName: string;
-  transactionMethod: "Kpay" | "Aya";
+  transactionMethod: string;
+  accountId?: string;
   date: string;
   products: ProductItem[];
   subtotal: number;
@@ -85,11 +92,14 @@ export default function SalesPage() {
   const [saleIdToDelete, setSaleIdToDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Accounts list state
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
+
   // Creation form fields
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [transactionName, setTransactionName] = useState("");
-  const [transactionMethod, setTransactionMethod] = useState<"Kpay" | "Aya">("Kpay");
+  const [transactionMethod, setTransactionMethod] = useState<string>("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [visibility, setVisibility] = useState<"Shared" | "Only Me">("Shared");
   const [saleItems, setSaleItems] = useState<{ productId: string; price: string; quantity: string }[]>([
@@ -109,7 +119,7 @@ export default function SalesPage() {
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerEmail, setEditCustomerEmail] = useState("");
   const [editTransactionName, setEditTransactionName] = useState("");
-  const [editTransactionMethod, setEditTransactionMethod] = useState<"Kpay" | "Aya">("Kpay");
+  const [editTransactionMethod, setEditTransactionMethod] = useState<string>("");
   const [editDate, setEditDate] = useState("");
   const [editVisibility, setEditVisibility] = useState<"Shared" | "Only Me">("Shared");
   const [editSaleItems, setEditSaleItems] = useState<{ productId: string; price: string; quantity: string }[]>([]);
@@ -139,6 +149,33 @@ export default function SalesPage() {
       setPredefinedDiscounts(list);
     }, (err) => {
       console.error("Discounts subscription error:", err);
+    });
+    return () => unsubscribe();
+  }, [profile]);
+
+  // Dynamic accounts real-time listener and auto-initialization
+  useEffect(() => {
+    if (!profile) return;
+    
+    // Auto-create defaults if there are no accounts
+    initializeDefaultAccounts(profile.uid);
+
+    const q = query(collection(db, "accounts"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: { id: string; name: string }[] = [];
+      snapshot.forEach((doc) => {
+        list.push({
+          id: doc.id,
+          name: doc.data().name
+        });
+      });
+      setAccounts(list);
+      // Default creation transactionMethod to first account if empty
+      if (list.length > 0) {
+        setTransactionMethod((prev) => prev || list[0].id);
+      }
+    }, (err) => {
+      console.error("Accounts subscription error:", err);
     });
     return () => unsubscribe();
   }, [profile]);
@@ -442,12 +479,11 @@ export default function SalesPage() {
         }
       }
 
-      await addDoc(collection(db, "sales"), {
+      const saleData = {
         customerSocialName: customerName.trim(),
         customerEmail: customerEmail.trim(),
         customerChannel,
         transactionName: transactionName.trim(),
-        transactionMethod,
         date,
         products: preparedProducts,
         subtotal,
@@ -458,14 +494,16 @@ export default function SalesPage() {
         discountName: finalDiscountName,
         discountAmount: finalDiscountAmount,
         note: note.trim()
-      });
+      };
+
+      await createSaleTransaction(saleData, transactionMethod);
 
       // Reset form
       setCustomerName("");
       setCustomerEmail("");
       setCustomerChannel("facebook");
       setTransactionName("");
-      setTransactionMethod("Kpay");
+      setTransactionMethod(accounts[0]?.id || "");
       setDate(new Date().toISOString().split("T")[0]);
       setSaleItems([{ productId: "", price: "", quantity: "1" }]);
       setVisibility("Shared");
@@ -488,7 +526,11 @@ export default function SalesPage() {
     setEditCustomerEmail(sale.customerEmail);
     setEditCustomerChannel(sale.customerChannel || "facebook");
     setEditTransactionName(sale.transactionName);
-    setEditTransactionMethod(sale.transactionMethod);
+    
+    // Resolve account ID for old sales
+    const matchedAcc = accounts.find(a => a.name === sale.transactionMethod || a.id === sale.accountId);
+    setEditTransactionMethod(sale.accountId || matchedAcc?.id || "");
+    
     setEditDate(sale.date);
     setEditVisibility(sale.shared ? "Shared" : "Only Me");
     setEditNote(sale.note || "");
@@ -588,12 +630,22 @@ export default function SalesPage() {
         }
       }
 
+      const oldSaleWithAccount = { ...editingSale };
+      if (!oldSaleWithAccount.accountId) {
+        const matchedAcc = accounts.find(a => a.name === oldSaleWithAccount.transactionMethod);
+        if (matchedAcc) {
+          oldSaleWithAccount.accountId = matchedAcc.id;
+        }
+      }
+
+      const selectedAccount = accounts.find(a => a.id === editTransactionMethod);
       const updatedFields: {
         customerSocialName: string;
         customerEmail: string;
         customerChannel: string;
         transactionName: string;
-        transactionMethod: "Kpay" | "Aya";
+        transactionMethod: string;
+        accountId: string;
         date: string;
         products: ProductItem[];
         subtotal: number;
@@ -607,7 +659,8 @@ export default function SalesPage() {
         customerEmail: editCustomerEmail.trim(),
         customerChannel: editCustomerChannel,
         transactionName: editTransactionName.trim(),
-        transactionMethod: editTransactionMethod,
+        accountId: editTransactionMethod,
+        transactionMethod: selectedAccount?.name || "",
         date: editDate,
         products: preparedProducts,
         subtotal,
@@ -621,7 +674,7 @@ export default function SalesPage() {
         updatedFields.shared = editVisibility === "Shared";
       }
 
-      await updateDoc(doc(db, "sales", editingSale.id), updatedFields);
+      await updateSaleTransaction(editingSale.id, updatedFields, oldSaleWithAccount);
 
       setEditDialogOpen(false);
       setEditingSale(null);
@@ -655,7 +708,19 @@ export default function SalesPage() {
     if (!saleIdToDelete) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, "sales", saleIdToDelete));
+      const saleToDelete = sales.find(s => s.id === saleIdToDelete);
+      if (saleToDelete) {
+        const saleWithAccount = { ...saleToDelete };
+        if (!saleWithAccount.accountId) {
+          const matchedAcc = accounts.find(a => a.name === saleToDelete.transactionMethod);
+          if (matchedAcc) {
+            saleWithAccount.accountId = matchedAcc.id;
+          }
+        }
+        await deleteSaleTransaction(saleIdToDelete, saleWithAccount);
+      } else {
+        await deleteDoc(doc(db, "sales", saleIdToDelete));
+      }
       setDeleteConfirmOpen(false);
       setSaleIdToDelete(null);
       await refresh();
@@ -824,14 +889,17 @@ export default function SalesPage() {
                       <RequiredLabel htmlFor="method" required>Transaction Method</RequiredLabel>
                       <Select
                         value={transactionMethod}
-                        onValueChange={(val: "Kpay" | "Aya") => setTransactionMethod(val)}
+                        onValueChange={(val: string) => setTransactionMethod(val)}
                       >
                         <SelectTrigger id="method">
-                          <SelectValue placeholder="Select Method" />
+                          <SelectValue placeholder="Select Account" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Kpay">Kpay</SelectItem>
-                          <SelectItem value="Aya">Aya</SelectItem>
+                          {accounts.map((acc) => (
+                            <SelectItem key={acc.id} value={acc.id}>
+                              {acc.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1236,14 +1304,17 @@ export default function SalesPage() {
                   <RequiredLabel htmlFor="editMethod" required>Transaction Method</RequiredLabel>
                   <Select
                     value={editTransactionMethod}
-                    onValueChange={(val: "Kpay" | "Aya") => setEditTransactionMethod(val)}
+                    onValueChange={(val: string) => setEditTransactionMethod(val)}
                   >
                     <SelectTrigger id="editMethod">
-                      <SelectValue placeholder="Select Method" />
+                      <SelectValue placeholder="Select Account" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Kpay">Kpay</SelectItem>
-                      <SelectItem value="Aya">Aya</SelectItem>
+                      {accounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          {acc.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
