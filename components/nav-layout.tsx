@@ -9,6 +9,7 @@ import {
   ShoppingCart,
   Package,
   CreditCard,
+  Wallet,
   Users,
   LogOut,
   Menu,
@@ -51,6 +52,7 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
 
   // Admin-only links
   if (profile?.role === "admin") {
+    navigation.push({ name: "Accounts", href: "/accounts", icon: Wallet });
     navigation.push({ name: "Users", href: "/users", icon: Users });
   }
 
