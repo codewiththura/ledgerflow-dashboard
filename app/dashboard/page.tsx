@@ -706,7 +706,7 @@ export default function DashboardPage() {
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" />
-                      Personal: Ks {metrics.personalExpenses.toLocaleString()}
+                      Pers: Ks {metrics.personalExpenses.toLocaleString()}
                     </span>
                   </div>
                 </CardContent>
@@ -881,7 +881,7 @@ export default function DashboardPage() {
                           />
                         )}
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+                      <div className="mt-2 flex items-center flex-wrap gap-2 text-xs text-muted-foreground font-sans">
                         <span className="inline-flex items-center gap-1">
                           <span className="h-1.5 w-1.5 rounded-full bg-blue-500 inline-block" />
                           Biz: Ks{" "}
@@ -889,7 +889,7 @@ export default function DashboardPage() {
                         </span>
                         <span className="inline-flex items-center gap-1">
                           <span className="h-1.5 w-1.5 rounded-full bg-amber-500 inline-block" />
-                          Personal: Ks{" "}
+                          Pers: Ks{" "}
                           {metrics.sharedPersonalExpenses.toLocaleString()}
                         </span>
                       </div>
@@ -919,7 +919,7 @@ export default function DashboardPage() {
                           />
                         )}
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+                      <div className="mt-2 flex items-center flex-wrap gap-2 text-xs text-muted-foreground font-sans">
                         <span className="inline-flex items-center gap-1">
                           <span className="h-1.5 w-1.5 rounded-full bg-blue-500 inline-block" />
                           Biz: Ks{" "}
@@ -927,7 +927,7 @@ export default function DashboardPage() {
                         </span>
                         <span className="inline-flex items-center gap-1">
                           <span className="h-1.5 w-1.5 rounded-full bg-amber-500 inline-block" />
-                          Personal: Ks{" "}
+                          Pers: Ks{" "}
                           {metrics.privatePersonalExpenses.toLocaleString()}
                         </span>
                       </div>
@@ -987,7 +987,7 @@ export default function DashboardPage() {
                         )}
                       </div>
                       <p className="text-[10px] text-muted-foreground font-sans font-normal">
-                        Personal sales minus expenses
+                        Personal sales minus spends
                       </p>
                     </CardContent>
                   </Card>

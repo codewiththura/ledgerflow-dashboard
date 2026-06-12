@@ -108,7 +108,8 @@ export default function AccountsPage() {
   const [editAccountOpen, setEditAccountOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editAccountName, setEditAccountName] = useState("");
-  const [editAccountInitialBalance, setEditAccountInitialBalance] = useState("");
+  const [editAccountInitialBalance, setEditAccountInitialBalance] =
+    useState("");
   const [editAccountError, setEditAccountError] = useState<string | null>(null);
   const [updatingAccount, setUpdatingAccount] = useState(false);
 
@@ -202,7 +203,7 @@ export default function AccountsPage() {
       },
       (err) => {
         console.error("Expenses snapshot error:", err);
-      }
+      },
     );
 
     return () => {
@@ -369,7 +370,7 @@ export default function AccountsPage() {
         editingAccount.initialBalance,
         newInitialBal,
         profile?.uid || "",
-        profile?.email || ""
+        profile?.email || "",
       );
       setEditAccountOpen(false);
       setEditingAccount(null);
@@ -420,7 +421,11 @@ export default function AccountsPage() {
         amount,
         reason,
       };
-      await updateAdjustmentTransaction(editingAdj.id, updatedFields, editingAdj);
+      await updateAdjustmentTransaction(
+        editingAdj.id,
+        updatedFields,
+        editingAdj,
+      );
       setEditAdjOpen(false);
       setEditingAdj(null);
     } catch (err: any) {
@@ -476,7 +481,8 @@ export default function AccountsPage() {
           <ShieldAlert className="h-12 w-12 text-destructive" />
           <h2 className="text-lg font-bold">Access Denied</h2>
           <p className="text-sm text-muted-foreground max-w-md">
-            Only administrators are authorized to view the accounts dashboard page.
+            Only administrators are authorized to view the accounts dashboard
+            page.
           </p>
         </div>
       </NavLayout>
@@ -503,9 +509,11 @@ export default function AccountsPage() {
                 variant="outline"
                 onClick={handleSyncBalances}
                 disabled={syncing}
-                className="flex items-center gap-2"
+                className="hidden md:flex md:items-center md:gap-2"
               >
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+                />
                 {syncing ? "Syncing..." : "Sync Balances"}
               </Button>
 
@@ -704,14 +712,17 @@ export default function AccountsPage() {
           <Alert className="bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/30 font-sans">
             <AlertTitle className="text-xs font-semibold">Success</AlertTitle>
             <AlertDescription className="text-xs">
-              All account balances successfully recalculated and synchronized with historical sales.
+              All account balances successfully recalculated and synchronized
+              with historical sales.
             </AlertDescription>
           </Alert>
         )}
 
         {syncError && (
           <Alert variant="destructive" className="font-sans">
-            <AlertTitle className="text-xs font-semibold">Error Syncing Balances</AlertTitle>
+            <AlertTitle className="text-xs font-semibold">
+              Error Syncing Balances
+            </AlertTitle>
             <AlertDescription className="text-xs">{syncError}</AlertDescription>
           </Alert>
         )}
@@ -847,7 +858,9 @@ export default function AccountsPage() {
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-muted-foreground">Total Cash Out</span>
+                      <span className="text-muted-foreground">
+                        Total Cash Out
+                      </span>
                       <span className="font-semibold text-rose-600 dark:text-rose-400">
                         Ks {(cashOutByAccount[acc.id] || 0).toLocaleString()}
                       </span>
@@ -921,7 +934,8 @@ export default function AccountsPage() {
                               Ks {acc.currentBalance.toLocaleString()}
                             </TableCell>
                             <TableCell className="text-right font-semibold text-rose-600 dark:text-rose-400">
-                              Ks {(cashOutByAccount[acc.id] || 0).toLocaleString()}
+                              Ks{" "}
+                              {(cashOutByAccount[acc.id] || 0).toLocaleString()}
                             </TableCell>
                             <TableCell
                               className={`text-right font-semibold ${growth >= 0 ? "text-emerald-600" : "text-rose-600"}`}
@@ -1052,7 +1066,10 @@ export default function AccountsPage() {
             </DialogDescription>
           </DialogHeader>
           {editingAccount && (
-            <form onSubmit={handleUpdateAccount} className="space-y-4 py-4 font-sans text-sm">
+            <form
+              onSubmit={handleUpdateAccount}
+              className="space-y-4 py-4 font-sans text-sm"
+            >
               {editAccountError && (
                 <Alert variant="destructive">
                   <AlertDescription>{editAccountError}</AlertDescription>
@@ -1112,7 +1129,10 @@ export default function AccountsPage() {
             </DialogDescription>
           </DialogHeader>
           {editingAdj && (
-            <form onSubmit={handleUpdateAdjustment} className="space-y-4 py-4 font-sans text-sm">
+            <form
+              onSubmit={handleUpdateAdjustment}
+              className="space-y-4 py-4 font-sans text-sm"
+            >
               {editAdjError && (
                 <Alert variant="destructive">
                   <AlertDescription>{editAdjError}</AlertDescription>
