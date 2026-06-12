@@ -9,19 +9,53 @@ import {
   orderBy,
   doc,
   updateDoc,
-  deleteDoc
+  deleteDoc,
+  onSnapshot,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/auth-context";
 import { NavLayout } from "@/components/nav-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Account,
+  createExpenseTransaction,
+  updateExpenseTransaction,
+  deleteExpenseTransaction,
+} from "@/lib/accounts-db";
 import { Plus, Trash2, Edit } from "lucide-react";
 import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -37,6 +71,9 @@ interface Expense {
   shared: boolean;
   createdBy: string;
   createdAt: string;
+  expenseType?: "business" | "personal";
+  accountId?: string;
+  accountName?: string;
 }
 
 export default function ExpensesPage() {
@@ -44,9 +81,16 @@ export default function ExpensesPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
+  // Accounts support
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [editAccountId, setEditAccountId] = useState("");
+
   // Custom delete confirm state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [expenseIdToDelete, setExpenseIdToDelete] = useState<string | null>(null);
+  const [expenseIdToDelete, setExpenseIdToDelete] = useState<string | null>(
+    null,
+  );
   const [deleting, setDeleting] = useState(false);
 
   // Create form fields
@@ -54,6 +98,9 @@ export default function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [note, setNote] = useState("");
+  const [expenseType, setExpenseType] = useState<"business" | "personal">(
+    "business",
+  );
   const [visibility, setVisibility] = useState<"Shared" | "Only Me">("Shared");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -64,12 +111,33 @@ export default function ExpensesPage() {
   const [editAmount, setEditAmount] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editNote, setEditNote] = useState("");
-  const [editVisibility, setEditVisibility] = useState<"Shared" | "Only Me">("Shared");
+  const [editExpenseType, setEditExpenseType] = useState<
+    "business" | "personal"
+  >("business");
+  const [editVisibility, setEditVisibility] = useState<"Shared" | "Only Me">(
+    "Shared",
+  );
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
 
+  // Fetch dynamic accounts
+  React.useEffect(() => {
+    const q = query(collection(db, "accounts"), orderBy("name", "asc"));
+    return onSnapshot(q, (snapshot) => {
+      const list: Account[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() } as Account);
+      });
+      setAccounts(list);
+      if (list.length > 0) {
+        setAccountId((prev) => prev || list[0].id);
+      }
+    });
+  }, []);
+
   const createExpensesQuery = React.useCallback(() => {
-    if (!profile) return query(collection(db, "expenses"), orderBy("date", "desc"));
+    if (!profile)
+      return query(collection(db, "expenses"), orderBy("date", "desc"));
 
     if (profile.role === "admin") {
       return query(collection(db, "expenses"), orderBy("date", "desc"));
@@ -77,7 +145,7 @@ export default function ExpensesPage() {
       return query(
         collection(db, "expenses"),
         where("shared", "==", true),
-        orderBy("date", "desc")
+        orderBy("date", "desc"),
       );
     }
   }, [profile]);
@@ -92,12 +160,12 @@ export default function ExpensesPage() {
     hasMore,
     nextPage,
     prevPage,
-    refresh
+    refresh,
   } = useFirestorePagination<Expense>(
     createExpensesQuery,
     10,
     [profile?.role],
-    !!profile
+    !!profile,
   );
 
   const handleCreateExpense = async (e: React.FormEvent) => {
@@ -113,6 +181,10 @@ export default function ExpensesPage() {
       setFormError("Amount must be a valid positive number.");
       return;
     }
+    if (!accountId) {
+      setFormError("Please select a payment account.");
+      return;
+    }
     if (!date) {
       setFormError("Date is required.");
       return;
@@ -121,27 +193,36 @@ export default function ExpensesPage() {
     setSubmitting(true);
     try {
       // If admin, they choose visibility. If moderator, it defaults to "Only Me".
-      const isShared = profile?.role === "admin" ? (visibility === "Shared") : true;
-      await addDoc(collection(db, "expenses"), {
-        title: title.trim(),
-        amount: parsedAmount,
-        date: date,
-        note: note.trim(),
-        shared: isShared,
-        createdBy: profile?.uid || "",
-        createdAt: new Date().toISOString(),
-      });
+      const isShared =
+        profile?.role === "admin" ? visibility === "Shared" : true;
+      await createExpenseTransaction(
+        {
+          title: title.trim(),
+          amount: parsedAmount,
+          date: date,
+          note: note.trim(),
+          shared: isShared,
+          createdBy: profile?.uid || "",
+          createdAt: new Date().toISOString(),
+          expenseType: expenseType,
+        },
+        accountId,
+      );
 
       setTitle("");
       setAmount("");
       setDate(new Date().toISOString().split("T")[0]);
       setNote("");
+      setExpenseType("business");
       setVisibility("Shared");
+      if (accounts.length > 0) {
+        setAccountId(accounts[0].id);
+      }
       setCreateDialogOpen(false);
       await refresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error creating expense:", err);
-      setFormError("Failed to save expense.");
+      setFormError(err.message || "Failed to save expense.");
     } finally {
       setSubmitting(false);
     }
@@ -153,7 +234,9 @@ export default function ExpensesPage() {
     setEditAmount(expense.amount.toString());
     setEditDate(expense.date);
     setEditNote(expense.note);
+    setEditExpenseType(expense.expenseType || "business");
     setEditVisibility(expense.shared ? "Shared" : "Only Me");
+    setEditAccountId(expense.accountId || "");
     setEditFormError(null);
     setEditDialogOpen(true);
   };
@@ -173,6 +256,10 @@ export default function ExpensesPage() {
       setEditFormError("Amount must be a valid positive number.");
       return;
     }
+    if (!editAccountId) {
+      setEditFormError("Please select a payment account.");
+      return;
+    }
     if (!editDate) {
       setEditFormError("Date is required.");
       return;
@@ -180,30 +267,30 @@ export default function ExpensesPage() {
 
     setUpdating(true);
     try {
-      const updatedFields: {
-        title: string;
-        amount: number;
-        date: string;
-        note: string;
-        shared?: boolean;
-      } = {
+      const updatedFields: any = {
         title: editTitle.trim(),
         amount: parsedAmount,
         date: editDate,
         note: editNote.trim(),
+        expenseType: editExpenseType,
+        accountId: editAccountId,
       };
 
       if (profile?.role === "admin") {
         updatedFields.shared = editVisibility === "Shared";
       }
 
-      await updateDoc(doc(db, "expenses", editingExpense.id), updatedFields);
+      await updateExpenseTransaction(
+        editingExpense.id,
+        updatedFields,
+        editingExpense,
+      );
       setEditDialogOpen(false);
       setEditingExpense(null);
       await refresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error updating expense:", err);
-      setEditFormError("Failed to update expense.");
+      setEditFormError(err.message || "Failed to update expense.");
     } finally {
       setUpdating(false);
     }
@@ -213,7 +300,7 @@ export default function ExpensesPage() {
     if (profile?.role !== "admin") return;
     try {
       await updateDoc(doc(db, "expenses", expense.id), {
-        shared: !expense.shared
+        shared: !expense.shared,
       });
       await refresh();
     } catch (err) {
@@ -228,9 +315,12 @@ export default function ExpensesPage() {
 
   const handleConfirmDelete = async () => {
     if (!expenseIdToDelete) return;
+    const expenseData = expenses.find((e) => e.id === expenseIdToDelete);
+    if (!expenseData) return;
+
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, "expenses", expenseIdToDelete));
+      await deleteExpenseTransaction(expenseIdToDelete, expenseData);
       setDeleteConfirmOpen(false);
       setExpenseIdToDelete(null);
       await refresh();
@@ -246,7 +336,9 @@ export default function ExpensesPage() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 className="text-xl font-bold font-sans tracking-tight">Expenses Log</h2>
+            <h2 className="text-xl font-bold font-sans tracking-tight">
+              Expenses Log
+            </h2>
             <p className="text-sm text-muted-foreground font-sans">
               Track business operational costs and spending.
             </p>
@@ -273,7 +365,9 @@ export default function ExpensesPage() {
                   </Alert>
                 )}
                 <div className="space-y-2">
-                  <RequiredLabel htmlFor="title" required>Expense Title</RequiredLabel>
+                  <RequiredLabel htmlFor="title" required>
+                    Expense Title
+                  </RequiredLabel>
                   <Input
                     id="title"
                     value={title}
@@ -283,7 +377,9 @@ export default function ExpensesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <RequiredLabel htmlFor="amount" required>Amount</RequiredLabel>
+                  <RequiredLabel htmlFor="amount" required>
+                    Amount
+                  </RequiredLabel>
                   <Input
                     id="amount"
                     type="number"
@@ -296,7 +392,45 @@ export default function ExpensesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <RequiredLabel htmlFor="date" required>Date</RequiredLabel>
+                  <RequiredLabel htmlFor="accountId" required>
+                    Payment Account
+                  </RequiredLabel>
+                  <Select value={accountId} onValueChange={setAccountId}>
+                    <SelectTrigger id="accountId">
+                      <SelectValue placeholder="Select payment account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          {acc.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="expenseType" required>
+                    Expense Type
+                  </RequiredLabel>
+                  <Select
+                    value={expenseType}
+                    onValueChange={(val: "business" | "personal") =>
+                      setExpenseType(val)
+                    }
+                  >
+                    <SelectTrigger id="expenseType">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="business">Business</SelectItem>
+                      <SelectItem value="personal">Personal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <RequiredLabel htmlFor="date" required>
+                    Date
+                  </RequiredLabel>
                   <Input
                     id="date"
                     type="date"
@@ -316,10 +450,14 @@ export default function ExpensesPage() {
                 </div>
                 {profile?.role === "admin" && (
                   <div className="space-y-2">
-                    <RequiredLabel htmlFor="visibility" required>Visibility</RequiredLabel>
+                    <RequiredLabel htmlFor="visibility" required>
+                      Visibility
+                    </RequiredLabel>
                     <Select
                       value={visibility}
-                      onValueChange={(val: "Shared" | "Only Me") => setVisibility(val)}
+                      onValueChange={(val: "Shared" | "Only Me") =>
+                        setVisibility(val)
+                      }
                     >
                       <SelectTrigger id="visibility">
                         <SelectValue placeholder="Select visibility" />
@@ -332,7 +470,12 @@ export default function ExpensesPage() {
                   </div>
                 )}
                 <DialogFooter className="pt-4">
-                  <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setCreateDialogOpen(false)}
+                    disabled={submitting}
+                  >
                     Cancel
                   </Button>
                   <Button type="submit" disabled={submitting}>
@@ -346,7 +489,9 @@ export default function ExpensesPage() {
 
         <Card className="border border-border shadow-sm">
           <CardHeader className="p-4 sm:p-6 border-b border-border">
-            <CardTitle className="text-md font-bold font-sans">Expenses List</CardTitle>
+            <CardTitle className="text-md font-bold font-sans">
+              Expenses List
+            </CardTitle>
             <CardDescription className="text-xs font-sans">
               {totalCount} expenses logged.
             </CardDescription>
@@ -366,7 +511,9 @@ export default function ExpensesPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Title</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Notes</TableHead>
+                    <TableHead>Account</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     {profile?.role === "admin" && (
                       <TableHead className="text-center">Visibility</TableHead>
@@ -377,12 +524,36 @@ export default function ExpensesPage() {
                 <TableBody>
                   {expenses.map((expense) => (
                     <TableRow key={expense.id}>
-                      <TableCell className="whitespace-nowrap">{expense.date}</TableCell>
-                      <TableCell className="font-medium">{expense.title}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {expense.date}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {expense.title}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            expense.expenseType === "personal"
+                              ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/50"
+                              : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/50"
+                          }
+                        >
+                          {expense.expenseType
+                            ? expense.expenseType.charAt(0).toUpperCase() +
+                              expense.expenseType.slice(1)
+                            : "Business"}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate">
                         {expense.note || "-"}
                       </TableCell>
-                      <TableCell className="text-right">Ks {expense.amount.toLocaleString()}</TableCell>
+                      <TableCell className="font-sans font-medium text-xs text-muted-foreground">
+                        {expense.accountName || "-"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        Ks {expense.amount.toLocaleString()}
+                      </TableCell>
                       {profile?.role === "admin" && (
                         <TableCell className="text-center">
                           <button
@@ -465,7 +636,9 @@ export default function ExpensesPage() {
                 </Alert>
               )}
               <div className="space-y-2">
-                <RequiredLabel htmlFor="edit-title" required>Expense Title</RequiredLabel>
+                <RequiredLabel htmlFor="edit-title" required>
+                  Expense Title
+                </RequiredLabel>
                 <Input
                   id="edit-title"
                   value={editTitle}
@@ -475,7 +648,9 @@ export default function ExpensesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <RequiredLabel htmlFor="edit-amount" required>Amount</RequiredLabel>
+                <RequiredLabel htmlFor="edit-amount" required>
+                  Amount
+                </RequiredLabel>
                 <Input
                   id="edit-amount"
                   type="number"
@@ -488,7 +663,45 @@ export default function ExpensesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <RequiredLabel htmlFor="edit-date" required>Date</RequiredLabel>
+                <RequiredLabel htmlFor="edit-accountId" required>
+                  Payment Account
+                </RequiredLabel>
+                <Select value={editAccountId} onValueChange={setEditAccountId}>
+                  <SelectTrigger id="edit-accountId">
+                    <SelectValue placeholder="Select payment account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((acc) => (
+                      <SelectItem key={acc.id} value={acc.id}>
+                        {acc.name} (Ks {acc.currentBalance.toLocaleString()})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="edit-expenseType" required>
+                  Expense Type
+                </RequiredLabel>
+                <Select
+                  value={editExpenseType}
+                  onValueChange={(val: "business" | "personal") =>
+                    setEditExpenseType(val)
+                  }
+                >
+                  <SelectTrigger id="edit-expenseType">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="business">Business</SelectItem>
+                    <SelectItem value="personal">Personal</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="edit-date" required>
+                  Date
+                </RequiredLabel>
                 <Input
                   id="edit-date"
                   type="date"
@@ -498,7 +711,9 @@ export default function ExpensesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <RequiredLabel htmlFor="edit-note">Notes (Optional)</RequiredLabel>
+                <RequiredLabel htmlFor="edit-note">
+                  Notes (Optional)
+                </RequiredLabel>
                 <Input
                   id="edit-note"
                   value={editNote}
@@ -508,10 +723,14 @@ export default function ExpensesPage() {
               </div>
               {profile?.role === "admin" && (
                 <div className="space-y-2">
-                  <RequiredLabel htmlFor="edit-visibility" required>Visibility</RequiredLabel>
+                  <RequiredLabel htmlFor="edit-visibility" required>
+                    Visibility
+                  </RequiredLabel>
                   <Select
                     value={editVisibility}
-                    onValueChange={(val: "Shared" | "Only Me") => setEditVisibility(val)}
+                    onValueChange={(val: "Shared" | "Only Me") =>
+                      setEditVisibility(val)
+                    }
                   >
                     <SelectTrigger id="edit-visibility">
                       <SelectValue placeholder="Select visibility" />
@@ -524,7 +743,12 @@ export default function ExpensesPage() {
                 </div>
               )}
               <DialogFooter className="pt-4">
-                <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={updating}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditDialogOpen(false)}
+                  disabled={updating}
+                >
                   Cancel
                 </Button>
                 <Button type="submit" disabled={updating}>
