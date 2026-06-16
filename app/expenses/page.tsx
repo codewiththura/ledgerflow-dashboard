@@ -673,7 +673,7 @@ export default function ExpensesPage() {
                   <SelectContent>
                     {accounts.map((acc) => (
                       <SelectItem key={acc.id} value={acc.id}>
-                        {acc.name} (Ks {acc.currentBalance.toLocaleString()})
+                        {acc.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
