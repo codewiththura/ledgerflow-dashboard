@@ -32,6 +32,15 @@ export interface AccountAdjustment {
   date: string;
 }
 
+export interface Installment {
+  id: string;
+  amount: number;
+  status: "Paid" | "Pending";
+  paidDate?: string;
+  accountId?: string;
+  transactionMethod?: string;
+}
+
 /**
  * Resolves an account ID by matching the name.
  * Used for backward compatibility with historical sales.
@@ -151,26 +160,60 @@ export async function adjustAccountBalance(
  */
 export async function createSaleTransaction(saleData: any, accountId: string) {
   await runTransaction(db, async (transaction) => {
-    const accountRef = doc(db, "accounts", accountId);
-    const accountSnap = await transaction.get(accountRef);
-    if (!accountSnap.exists()) {
-      throw new Error("Account does not exist.");
+    const accountUpdates: { [accountId: string]: number } = {};
+
+    if (saleData.saleType === "service" && saleData.installments) {
+      saleData.installments.forEach((inst: any) => {
+        if (inst.status === "Paid" && inst.accountId) {
+          accountUpdates[inst.accountId] = (accountUpdates[inst.accountId] || 0) + inst.amount;
+        }
+      });
+    } else {
+      if (accountId) {
+        accountUpdates[accountId] = (accountUpdates[accountId] || 0) + saleData.total;
+      }
     }
-    const accountData = accountSnap.data();
-    const newBalance = (accountData.currentBalance || 0) + saleData.total;
+
+    const accountSnaps: { [accountId: string]: any } = {};
+    for (const accId of Object.keys(accountUpdates)) {
+      const accountRef = doc(db, "accounts", accId);
+      accountSnaps[accId] = await transaction.get(accountRef);
+      if (!accountSnaps[accId].exists()) {
+        throw new Error(`Account ${accId} does not exist.`);
+      }
+    }
 
     const salesCollectionRef = collection(db, "sales");
     const newSaleRef = doc(salesCollectionRef);
 
+    let transactionMethodName = "";
+    if (saleData.saleType === "service" && saleData.installments) {
+      const paidMethods: string[] = [];
+      saleData.installments.forEach((inst: any) => {
+        if (inst.status === "Paid" && inst.transactionMethod && !paidMethods.includes(inst.transactionMethod)) {
+          paidMethods.push(inst.transactionMethod);
+        }
+      });
+      transactionMethodName = paidMethods.length > 0 ? paidMethods.join(", ") : "Installments";
+    } else {
+      if (accountId && accountSnaps[accountId]) {
+        transactionMethodName = accountSnaps[accountId].data().name;
+      }
+    }
+
     transaction.set(newSaleRef, {
       ...saleData,
-      accountId,
-      transactionMethod: accountData.name
+      accountId: saleData.saleType === "service" ? "" : accountId,
+      transactionMethod: transactionMethodName
     });
 
-    transaction.update(accountRef, {
-      currentBalance: newBalance
-    });
+    for (const accId of Object.keys(accountUpdates)) {
+      const accountRef = doc(db, "accounts", accId);
+      const currentBal = accountSnaps[accId].data().currentBalance || 0;
+      transaction.update(accountRef, {
+        currentBalance: currentBal + accountUpdates[accId]
+      });
+    }
   });
 }
 
@@ -184,63 +227,80 @@ export async function updateSaleTransaction(
 ) {
   await runTransaction(db, async (transaction) => {
     const saleRef = doc(db, "sales", saleId);
-    
-    const oldAccountId = oldSaleData.accountId;
-    const newAccountId = updatedSaleData.accountId;
 
-    if (oldAccountId && oldAccountId === newAccountId) {
-      // Same account, update balance by the difference
-      const accountRef = doc(db, "accounts", newAccountId);
-      const accountSnap = await transaction.get(accountRef);
-      if (!accountSnap.exists()) {
-        throw new Error("Account does not exist.");
-      }
-      const accountData = accountSnap.data();
-      const difference = updatedSaleData.total - (oldSaleData.total || 0);
-      const newBalance = (accountData.currentBalance || 0) + difference;
+    const accountChanges: { [accountId: string]: number } = {};
 
-      transaction.update(saleRef, {
-        ...updatedSaleData,
-        transactionMethod: accountData.name
-      });
-      transaction.update(accountRef, {
-        currentBalance: newBalance
+    // Deduct old payments
+    if (oldSaleData.saleType === "service" && oldSaleData.installments) {
+      oldSaleData.installments.forEach((inst: any) => {
+        if (inst.status === "Paid" && inst.accountId) {
+          accountChanges[inst.accountId] = (accountChanges[inst.accountId] || 0) - inst.amount;
+        }
       });
     } else {
-      // Account changed or old sale did not have an accountId
-      
-      // 1. Perform all reads first
-      let oldAccountSnap = null;
+      const oldAccountId = oldSaleData.accountId;
       if (oldAccountId) {
-        const oldAccountRef = doc(db, "accounts", oldAccountId);
-        oldAccountSnap = await transaction.get(oldAccountRef);
+        accountChanges[oldAccountId] = (accountChanges[oldAccountId] || 0) - (oldSaleData.total || 0);
       }
+    }
 
-      const newAccountRef = doc(db, "accounts", newAccountId);
-      const newAccountSnap = await transaction.get(newAccountRef);
-      
-      // 2. Perform all writes next
-      if (oldAccountId && oldAccountSnap && oldAccountSnap.exists()) {
-        const oldAccountData = oldAccountSnap.data();
-        const newOldBalance = (oldAccountData.currentBalance || 0) - (oldSaleData.total || 0);
-        const oldAccountRef = doc(db, "accounts", oldAccountId);
-        transaction.update(oldAccountRef, {
-          currentBalance: newOldBalance
-        });
-      }
-
-      if (!newAccountSnap.exists()) {
-        throw new Error("New account does not exist.");
-      }
-      const newAccountData = newAccountSnap.data();
-      const newNewBalance = (newAccountData.currentBalance || 0) + updatedSaleData.total;
-
-      transaction.update(saleRef, {
-        ...updatedSaleData,
-        transactionMethod: newAccountData.name
+    // Add updated payments
+    if (updatedSaleData.saleType === "service" && updatedSaleData.installments) {
+      updatedSaleData.installments.forEach((inst: any) => {
+        if (inst.status === "Paid" && inst.accountId) {
+          accountChanges[inst.accountId] = (accountChanges[inst.accountId] || 0) + inst.amount;
+        }
       });
-      transaction.update(newAccountRef, {
-        currentBalance: newNewBalance
+    } else {
+      const newAccountId = updatedSaleData.accountId;
+      if (newAccountId) {
+        accountChanges[newAccountId] = (accountChanges[newAccountId] || 0) + (updatedSaleData.total || 0);
+      }
+    }
+
+    const activeAccountIds = Object.keys(accountChanges).filter(id => accountChanges[id] !== 0);
+
+    const accountSnaps: { [accountId: string]: any } = {};
+    for (const accId of activeAccountIds) {
+      const accountRef = doc(db, "accounts", accId);
+      accountSnaps[accId] = await transaction.get(accountRef);
+      if (!accountSnaps[accId].exists()) {
+        throw new Error(`Account ${accId} does not exist.`);
+      }
+    }
+
+    let transactionMethodName = updatedSaleData.transactionMethod || "";
+    if (updatedSaleData.saleType === "service" && updatedSaleData.installments) {
+      const paidMethods: string[] = [];
+      for (const inst of updatedSaleData.installments) {
+        if (inst.status === "Paid" && inst.accountId) {
+          let name = inst.transactionMethod;
+          if (accountSnaps[inst.accountId]) {
+            name = accountSnaps[inst.accountId].data().name;
+          }
+          if (name && !paidMethods.includes(name)) {
+            paidMethods.push(name);
+          }
+        }
+      }
+      transactionMethodName = paidMethods.length > 0 ? paidMethods.join(", ") : "Installments";
+    } else {
+      const newAccountId = updatedSaleData.accountId;
+      if (newAccountId && accountSnaps[newAccountId]) {
+        transactionMethodName = accountSnaps[newAccountId].data().name;
+      }
+    }
+
+    transaction.update(saleRef, {
+      ...updatedSaleData,
+      transactionMethod: transactionMethodName
+    });
+
+    for (const accId of activeAccountIds) {
+      const accountRef = doc(db, "accounts", accId);
+      const currentBal = accountSnaps[accId].data().currentBalance || 0;
+      transaction.update(accountRef, {
+        currentBalance: currentBal + accountChanges[accId]
       });
     }
   });
@@ -252,20 +312,37 @@ export async function updateSaleTransaction(
 export async function deleteSaleTransaction(saleId: string, saleData: any) {
   await runTransaction(db, async (transaction) => {
     const saleRef = doc(db, "sales", saleId);
-    const accountId = saleData.accountId;
+    const accountDeductions: { [accountId: string]: number } = {};
 
-    if (accountId) {
-      const accountRef = doc(db, "accounts", accountId);
-      const accountSnap = await transaction.get(accountRef);
-      if (accountSnap.exists()) {
-        const accountData = accountSnap.data();
-        const newBalance = (accountData.currentBalance || 0) - (saleData.total || 0);
+    if (saleData.saleType === "service" && saleData.installments) {
+      saleData.installments.forEach((inst: any) => {
+        if (inst.status === "Paid" && inst.accountId) {
+          accountDeductions[inst.accountId] = (accountDeductions[inst.accountId] || 0) + inst.amount;
+        }
+      });
+    } else {
+      const accountId = saleData.accountId;
+      if (accountId) {
+        accountDeductions[accountId] = (accountDeductions[accountId] || 0) + (saleData.total || 0);
+      }
+    }
+
+    const accountSnaps: { [accountId: string]: any } = {};
+    for (const accId of Object.keys(accountDeductions)) {
+      const accountRef = doc(db, "accounts", accId);
+      accountSnaps[accId] = await transaction.get(accountRef);
+    }
+
+    for (const accId of Object.keys(accountDeductions)) {
+      if (accountSnaps[accId] && accountSnaps[accId].exists()) {
+        const currentBal = accountSnaps[accId].data().currentBalance || 0;
+        const accountRef = doc(db, "accounts", accId);
         transaction.update(accountRef, {
-          currentBalance: newBalance
+          currentBalance: currentBal - accountDeductions[accId]
         });
       }
     }
-    
+
     transaction.delete(saleRef);
   });
 }
@@ -281,7 +358,6 @@ export async function updateAccountName(accountId: string, oldName: string, newN
   if (normalizedNewName.toLowerCase() === oldName.toLowerCase()) {
     if (normalizedNewName === oldName) return;
   } else {
-    // Check if new name already exists
     const q = query(collection(db, "accounts"), where("name", "==", normalizedNewName));
     const snap = await getDocs(q);
     if (!snap.empty) {
@@ -289,11 +365,9 @@ export async function updateAccountName(accountId: string, oldName: string, newN
     }
   }
 
-  // 1. Get all sales referencing this account (by accountId, or by oldName for historical sales)
   const salesQuery1 = query(collection(db, "sales"), where("accountId", "==", accountId));
   const salesQuery2 = query(collection(db, "sales"), where("transactionMethod", "==", oldName));
   
-  // Get adjustments matching this account
   const adjustmentsQuery = query(collection(db, "account_adjustments"), where("accountId", "==", accountId));
 
   const [snap1, snap2, adjSnap] = await Promise.all([
@@ -302,23 +376,52 @@ export async function updateAccountName(accountId: string, oldName: string, newN
     getDocs(adjustmentsQuery)
   ]);
 
-  // Combine unique sales
   const saleDocsMap = new Map();
   snap1.docs.forEach((doc) => saleDocsMap.set(doc.id, doc));
   snap2.docs.forEach((doc) => saleDocsMap.set(doc.id, doc));
 
   const batch = writeBatch(db);
 
-  // Update the account doc
   const accountRef = doc(db, "accounts", accountId);
   batch.update(accountRef, { name: normalizedNewName });
 
-  // Update all referencing sales
   saleDocsMap.forEach((saleDoc) => {
-    batch.update(saleDoc.ref, { transactionMethod: normalizedNewName });
+    const saleData = saleDoc.data();
+    const updates: any = {};
+    let hasChanges = false;
+
+    if (saleData.saleType === "service" && saleData.installments) {
+      const updatedInstallments = saleData.installments.map((inst: any) => {
+        if (inst.accountId === accountId || (inst.transactionMethod && inst.transactionMethod.toLowerCase() === oldName.toLowerCase())) {
+          hasChanges = true;
+          return {
+            ...inst,
+            transactionMethod: normalizedNewName
+          };
+        }
+        return inst;
+      });
+
+      if (hasChanges) {
+        updates.installments = updatedInstallments;
+        const paidMethods: string[] = [];
+        updatedInstallments.forEach((inst: any) => {
+          if (inst.status === "Paid" && inst.transactionMethod && !paidMethods.includes(inst.transactionMethod)) {
+            paidMethods.push(inst.transactionMethod);
+          }
+        });
+        updates.transactionMethod = paidMethods.length > 0 ? paidMethods.join(", ") : "Installments";
+      }
+    } else {
+      updates.transactionMethod = normalizedNewName;
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      batch.update(saleDoc.ref, updates);
+    }
   });
 
-  // Update all referencing adjustments
   adjSnap.docs.forEach((adjDoc) => {
     batch.update(adjDoc.ref, { accountName: normalizedNewName });
   });
@@ -348,7 +451,6 @@ export async function recalculateAccountBalances() {
   const adjustments = adjustmentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
   const expenses = expensesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
 
-  // Initialize helper map for account current balances: accountId -> balance
   const accountBalances: { [key: string]: number } = {};
   const accountNamesToIds: { [key: string]: string } = {};
 
@@ -359,27 +461,38 @@ export async function recalculateAccountBalances() {
 
   const salesToUpdate: { ref: any; updates: any }[] = [];
 
-  // Accumulate sales
   sales.forEach(sale => {
-    let targetAccountId = sale.accountId;
+    if (sale.saleType === "service" && sale.installments) {
+      sale.installments.forEach((inst: any) => {
+        if (inst.status === "Paid") {
+          let instAccountId = inst.accountId;
+          if (!instAccountId && inst.transactionMethod) {
+            instAccountId = accountNamesToIds[inst.transactionMethod.toLowerCase()];
+          }
+          if (instAccountId && accountBalances[instAccountId] !== undefined) {
+            accountBalances[instAccountId] += (inst.amount || 0);
+          }
+        }
+      });
+    } else {
+      let targetAccountId = sale.accountId;
 
-    // If no accountId, try to match by transactionMethod
-    if (!targetAccountId && sale.transactionMethod) {
-      targetAccountId = accountNamesToIds[sale.transactionMethod.toLowerCase()];
-      if (targetAccountId) {
-        salesToUpdate.push({
-          ref: sale.ref,
-          updates: { accountId: targetAccountId }
-        });
+      if (!targetAccountId && sale.transactionMethod) {
+        targetAccountId = accountNamesToIds[sale.transactionMethod.toLowerCase()];
+        if (targetAccountId) {
+          salesToUpdate.push({
+            ref: sale.ref,
+            updates: { accountId: targetAccountId }
+          });
+        }
       }
-    }
 
-    if (targetAccountId && accountBalances[targetAccountId] !== undefined) {
-      accountBalances[targetAccountId] += (sale.total || 0);
+      if (targetAccountId && accountBalances[targetAccountId] !== undefined) {
+        accountBalances[targetAccountId] += (sale.total || 0);
+      }
     }
   });
 
-  // Accumulate adjustments
   adjustments.forEach(adj => {
     const targetAccountId = adj.accountId;
     if (targetAccountId && accountBalances[targetAccountId] !== undefined) {
@@ -391,7 +504,6 @@ export async function recalculateAccountBalances() {
     }
   });
 
-  // Deduct expenses
   expenses.forEach(exp => {
     const targetAccountId = exp.accountId;
     if (targetAccountId && accountBalances[targetAccountId] !== undefined) {
@@ -399,11 +511,9 @@ export async function recalculateAccountBalances() {
     }
   });
 
-  // Commit updates using batch writes
   let batch = writeBatch(db);
   let opCount = 0;
 
-  // 1. Update account balances
   for (const accId of Object.keys(accountBalances)) {
     if (opCount >= 400) {
       await batch.commit();
@@ -415,7 +525,6 @@ export async function recalculateAccountBalances() {
     opCount++;
   }
 
-  // 2. Update sales needing account ID link
   for (const saleUpdate of salesToUpdate) {
     if (opCount >= 400) {
       await batch.commit();
@@ -699,7 +808,6 @@ export async function updateAccountDetails(
     throw new Error("Account name cannot be empty.");
   }
 
-  // 1. Verify name uniqueness if changed
   if (normalizedNewName.toLowerCase() !== oldName.toLowerCase()) {
     const q = query(collection(db, "accounts"), where("name", "==", normalizedNewName));
     const snap = await getDocs(q);
@@ -708,7 +816,6 @@ export async function updateAccountDetails(
     }
   }
 
-  // 2. Perform updates in a transaction
   await runTransaction(db, async (transaction) => {
     const accountRef = doc(db, "accounts", accountId);
     const accountSnap = await transaction.get(accountRef);
@@ -717,18 +824,15 @@ export async function updateAccountDetails(
     }
     const accountData = accountSnap.data();
 
-    // Calculate current balance change if initial balance changed
     const initialBalanceDiff = newInitialBalance - oldInitialBalance;
     const newCurrentBalance = (accountData.currentBalance || 0) + initialBalanceDiff;
 
-    // Update account doc
     transaction.update(accountRef, {
       name: normalizedNewName,
       initialBalance: newInitialBalance,
       currentBalance: newCurrentBalance
     });
 
-    // If initial balance changed, create a log record
     if (initialBalanceDiff !== 0) {
       const adjustmentsCollectionRef = collection(db, "account_adjustments");
       const newAdjustmentRef = doc(adjustmentsCollectionRef);
@@ -746,7 +850,6 @@ export async function updateAccountDetails(
     }
   });
 
-  // 3. If name changed, rename associated records in batch
   if (normalizedNewName.toLowerCase() !== oldName.toLowerCase()) {
     const salesQuery1 = query(collection(db, "sales"), where("accountId", "==", accountId));
     const salesQuery2 = query(collection(db, "sales"), where("transactionMethod", "==", oldName));
@@ -765,7 +868,40 @@ export async function updateAccountDetails(
     const batch = writeBatch(db);
 
     saleDocsMap.forEach((saleDoc) => {
-      batch.update(saleDoc.ref, { transactionMethod: normalizedNewName });
+      const saleData = saleDoc.data();
+      const updates: any = {};
+      let hasChanges = false;
+
+      if (saleData.saleType === "service" && saleData.installments) {
+        const updatedInstallments = saleData.installments.map((inst: any) => {
+          if (inst.accountId === accountId || (inst.transactionMethod && inst.transactionMethod.toLowerCase() === oldName.toLowerCase())) {
+            hasChanges = true;
+            return {
+              ...inst,
+              transactionMethod: normalizedNewName
+            };
+          }
+          return inst;
+        });
+
+        if (hasChanges) {
+          updates.installments = updatedInstallments;
+          const paidMethods: string[] = [];
+          updatedInstallments.forEach((inst: any) => {
+            if (inst.status === "Paid" && inst.transactionMethod && !paidMethods.includes(inst.transactionMethod)) {
+              paidMethods.push(inst.transactionMethod);
+            }
+          });
+          updates.transactionMethod = paidMethods.length > 0 ? paidMethods.join(", ") : "Installments";
+        }
+      } else {
+        updates.transactionMethod = normalizedNewName;
+        hasChanges = true;
+      }
+
+      if (hasChanges) {
+        batch.update(saleDoc.ref, updates);
+      }
     });
 
     adjSnap.docs.forEach((adjDoc) => {

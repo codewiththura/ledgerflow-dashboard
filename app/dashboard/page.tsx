@@ -99,6 +99,12 @@ interface Sale {
   approved: boolean;
   shared?: boolean;
   createdAt: string;
+  saleType?: "product" | "service";
+  serviceType?: string;
+  serviceName?: string;
+  paymentType?: "Full" | "Partial";
+  installmentPlan?: "2" | "3" | "custom";
+  installments?: any[];
 }
 
 interface Expense {
@@ -193,11 +199,22 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
         privateCustomerSet.add(cName);
       }
     }
-    totalSalesVal += sale.total;
+
+    let saleAmt = sale.total;
+    if (sale.saleType === "service") {
+      const paidSum = sale.installments
+        ? sale.installments
+            .filter((i) => i.status === "Paid")
+            .reduce((sum, i) => sum + i.amount, 0)
+        : 0;
+      saleAmt = paidSum;
+    }
+
+    totalSalesVal += saleAmt;
     if (sale.shared === true) {
-      sharedSalesVal += sale.total;
+      sharedSalesVal += saleAmt;
     } else {
-      privateSalesVal += sale.total;
+      privateSalesVal += saleAmt;
     }
   });
 
@@ -244,17 +261,19 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
     [id: string]: { name: string; quantity: number; revenue: number };
   } = {};
   filteredSales.forEach((sale) => {
-    sale.products.forEach((p) => {
-      if (!productCounts[p.productId]) {
-        productCounts[p.productId] = {
-          name: p.name,
-          quantity: 0,
-          revenue: 0,
-        };
-      }
-      productCounts[p.productId].quantity += p.quantity;
-      productCounts[p.productId].revenue += p.price * p.quantity;
-    });
+    if (sale.products) {
+      sale.products.forEach((p) => {
+        if (!productCounts[p.productId]) {
+          productCounts[p.productId] = {
+            name: p.name,
+            quantity: 0,
+            revenue: 0,
+          };
+        }
+        productCounts[p.productId].quantity += p.quantity;
+        productCounts[p.productId].revenue += p.price * p.quantity;
+      });
+    }
   });
 
   const topProducts = Object.values(productCounts)
@@ -524,22 +543,47 @@ export default function DashboardPage() {
 
     // Populate dates
     filteredSales.forEach((sale) => {
-      if (!dailyMap[sale.date]) {
-        dailyMap[sale.date] = {
-          date: sale.date,
-          sales: 0,
-          expenses: 0,
-          sharedSales: 0,
-          privateSales: 0,
-          sharedExpenses: 0,
-          privateExpenses: 0,
-        };
-      }
-      dailyMap[sale.date].sales += sale.total;
-      if (sale.shared === true) {
-        dailyMap[sale.date].sharedSales += sale.total;
+      if (sale.saleType === "service" && sale.installments) {
+        sale.installments.forEach((inst) => {
+          if (inst.status === "Paid") {
+            const dateStr = inst.paidDate || sale.date;
+            if (!dailyMap[dateStr]) {
+              dailyMap[dateStr] = {
+                date: dateStr,
+                sales: 0,
+                expenses: 0,
+                sharedSales: 0,
+                privateSales: 0,
+                sharedExpenses: 0,
+                privateExpenses: 0,
+              };
+            }
+            dailyMap[dateStr].sales += inst.amount;
+            if (sale.shared === true) {
+              dailyMap[dateStr].sharedSales += inst.amount;
+            } else {
+              dailyMap[dateStr].privateSales += inst.amount;
+            }
+          }
+        });
       } else {
-        dailyMap[sale.date].privateSales += sale.total;
+        if (!dailyMap[sale.date]) {
+          dailyMap[sale.date] = {
+            date: sale.date,
+            sales: 0,
+            expenses: 0,
+            sharedSales: 0,
+            privateSales: 0,
+            sharedExpenses: 0,
+            privateExpenses: 0,
+          };
+        }
+        dailyMap[sale.date].sales += sale.total;
+        if (sale.shared === true) {
+          dailyMap[sale.date].sharedSales += sale.total;
+        } else {
+          dailyMap[sale.date].privateSales += sale.total;
+        }
       }
     });
 
