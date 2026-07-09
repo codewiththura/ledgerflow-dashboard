@@ -56,6 +56,7 @@ import {
   Edit,
   RefreshCw,
   Trash2,
+  ArrowRightLeft,
 } from "lucide-react";
 import {
   Account,
@@ -68,6 +69,7 @@ import {
   updateAdjustmentTransaction,
   deleteAdjustmentTransaction,
   updateAccountDetails,
+  transferAccountFunds,
 } from "@/lib/accounts-db";
 
 export default function AccountsPage() {
@@ -103,6 +105,18 @@ export default function AccountsPage() {
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [adjustError, setAdjustError] = useState<string | null>(null);
   const [adjusting, setAdjusting] = useState(false);
+
+  // Transfer Funds Form Fields
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [transferSourceAccountId, setTransferSourceAccountId] = useState("");
+  const [transferTargetAccountId, setTransferTargetAccountId] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferReason, setTransferReason] = useState("");
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferring, setTransferring] = useState(false);
+  const [transferFeeType, setTransferFeeType] = useState<"none" | "percent" | "fixed">("none");
+  const [transferFeeRate, setTransferFeeRate] = useState("0");
+  const [transferFeeAmount, setTransferFeeAmount] = useState(0);
 
   // Edit Account Form Fields
   const [editAccountOpen, setEditAccountOpen] = useState(false);
@@ -161,6 +175,10 @@ export default function AccountsPage() {
         // Auto-select first account in adjust dropdown if not set
         if (list.length > 0) {
           setSelectedAccountId((prev) => prev || list[0].id);
+          setTransferSourceAccountId((prev) => prev || list[0].id);
+          if (list.length > 1) {
+            setTransferTargetAccountId((prev) => prev || list[1].id);
+          }
         }
       },
       (err) => {
@@ -213,6 +231,24 @@ export default function AccountsPage() {
     };
   }, [profile]);
 
+  // Dynamic transfer fee calculation
+  useEffect(() => {
+    const base = parseFloat(transferAmount) || 0;
+    const rate = parseFloat(transferFeeRate) || 0;
+
+    if (transferFeeType === "none" || base <= 0 || rate <= 0) {
+      setTransferFeeAmount(0);
+      return;
+    }
+
+    if (transferFeeType === "percent") {
+      const calc = (base * rate) / 100;
+      setTransferFeeAmount(Math.round(calc * 100) / 100);
+    } else if (transferFeeType === "fixed") {
+      setTransferFeeAmount(rate);
+    }
+  }, [transferAmount, transferFeeType, transferFeeRate]);
+
   // Aggregate Metrics
   const totalCash = useMemo(() => {
     return accounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
@@ -247,6 +283,15 @@ export default function AccountsPage() {
     });
     return map;
   }, [accounts, expenses, adjustments]);
+
+  const deleteDescription = useMemo(() => {
+    if (!adjIdToDelete) return "";
+    const adj = adjustments.find((a) => a.id === adjIdToDelete);
+    if (adj?.isTransfer) {
+      return "Are you sure you want to permanently delete this transfer? BOTH matching transfer log entries will be deleted, and both account balances will be reverted to reflect this deletion.";
+    }
+    return "Are you sure you want to permanently delete this balance adjustment? The account balance will be reverted to reflect this deletion.";
+  }, [adjIdToDelete, adjustments]);
 
   // Handle Account Creation
   const handleCreateAccount = async (e: React.FormEvent) => {
@@ -332,6 +377,68 @@ export default function AccountsPage() {
       setAdjustError(err.message || "Failed to adjust balance.");
     } finally {
       setAdjusting(false);
+    }
+  };
+
+  // Handle Funds Transfer
+  const handleTransferFunds = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTransferError(null);
+
+    const amount = parseFloat(transferAmount);
+    const reason = transferReason.trim();
+
+    if (!transferSourceAccountId || !transferTargetAccountId) {
+      setTransferError("Please select both source and target accounts.");
+      return;
+    }
+    if (transferSourceAccountId === transferTargetAccountId) {
+      setTransferError("Source and target accounts must be different.");
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      setTransferError("Amount must be a valid positive number.");
+      return;
+    }
+    if (!reason) {
+      setTransferError("Please provide a reason for the transfer.");
+      return;
+    }
+
+    const totalDeduction = amount + transferFeeAmount;
+
+    const sourceAcc = accounts.find((a) => a.id === transferSourceAccountId);
+    if (sourceAcc && (sourceAcc.currentBalance || 0) < totalDeduction) {
+      setTransferError(
+        `Insufficient funds in ${sourceAcc.name}. Available balance is Ks ${sourceAcc.currentBalance.toLocaleString()}. Required deduction (including fee) is Ks ${totalDeduction.toLocaleString()}.`
+      );
+      return;
+    }
+
+    setTransferring(true);
+    try {
+      await transferAccountFunds(
+        transferSourceAccountId,
+        transferTargetAccountId,
+        amount,
+        reason,
+        profile?.uid || "",
+        profile?.email || "",
+        transferFeeType,
+        parseFloat(transferFeeRate) || 0,
+        transferFeeAmount
+      );
+      // Reset & close
+      setTransferAmount("");
+      setTransferReason("");
+      setTransferFeeType("none");
+      setTransferFeeRate("0");
+      setTransferDialogOpen(false);
+    } catch (err: any) {
+      console.error(err);
+      setTransferError(err.message || "Failed to transfer funds.");
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -625,6 +732,186 @@ export default function AccountsPage() {
                       </Button>
                       <Button type="submit" disabled={adjusting}>
                         {adjusting ? "Processing..." : "Confirm Adjustment"}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog
+                open={transferDialogOpen}
+                onOpenChange={setTransferDialogOpen}
+              >
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="flex items-center gap-2">
+                    <ArrowRightLeft className="h-4 w-4" /> Transfer Funds
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[450px]">
+                  <DialogHeader>
+                    <DialogTitle>Transfer Funds</DialogTitle>
+                    <DialogDescription>
+                      Transfer money directly from one account to another.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form
+                    onSubmit={handleTransferFunds}
+                    className="space-y-4 py-4 font-sans text-sm"
+                  >
+                    {transferError && (
+                      <Alert variant="destructive">
+                        <AlertDescription>{transferError}</AlertDescription>
+                      </Alert>
+                    )}
+
+                    <div className="space-y-1">
+                      <RequiredLabel htmlFor="transferSource" required>
+                        Source Account (From)
+                      </RequiredLabel>
+                      <Select
+                        value={transferSourceAccountId}
+                        onValueChange={(val) => {
+                          setTransferSourceAccountId(val);
+                          if (val === transferTargetAccountId) {
+                            const other = accounts.find((a) => a.id !== val);
+                            setTransferTargetAccountId(other?.id || "");
+                          }
+                        }}
+                      >
+                        <SelectTrigger id="transferSource">
+                          <SelectValue placeholder="Select Source Account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {accounts.map((acc) => (
+                            <SelectItem key={acc.id} value={acc.id}>
+                              {acc.name} (Ks{" "}
+                              {acc.currentBalance.toLocaleString()})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <RequiredLabel htmlFor="transferTarget" required>
+                        Target Account (To)
+                      </RequiredLabel>
+                      <Select
+                        value={transferTargetAccountId}
+                        onValueChange={setTransferTargetAccountId}
+                      >
+                        <SelectTrigger id="transferTarget">
+                          <SelectValue placeholder="Select Target Account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {accounts
+                            .filter((acc) => acc.id !== transferSourceAccountId)
+                            .map((acc) => (
+                              <SelectItem key={acc.id} value={acc.id}>
+                                {acc.name} (Ks{" "}
+                                {acc.currentBalance.toLocaleString()})
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <RequiredLabel htmlFor="transferAmount" required>
+                        Amount (Ks)
+                      </RequiredLabel>
+                      <Input
+                        id="transferAmount"
+                        type="number"
+                        min="1"
+                        placeholder="50000"
+                        value={transferAmount}
+                        onChange={(e) => setTransferAmount(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <RequiredLabel htmlFor="transferFeeType">
+                          Fee Type
+                        </RequiredLabel>
+                        <Select
+                          value={transferFeeType}
+                          onValueChange={(val: "none" | "percent" | "fixed") => {
+                            setTransferFeeType(val);
+                            setTransferFeeRate("0");
+                          }}
+                        >
+                          <SelectTrigger id="transferFeeType">
+                            <SelectValue placeholder="Select Fee Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No Fee</SelectItem>
+                            <SelectItem value="percent">Percentage (%)</SelectItem>
+                            <SelectItem value="fixed">Fixed Amount (Ks)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <RequiredLabel htmlFor="transferFeeRate">
+                          {transferFeeType === "percent" ? "Rate (%)" : "Fee (Ks)"}
+                        </RequiredLabel>
+                        <Input
+                          id="transferFeeRate"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          disabled={transferFeeType === "none"}
+                          value={transferFeeRate}
+                          onChange={(e) => setTransferFeeRate(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Calculated Fee Summary */}
+                    {transferFeeType !== "none" && (
+                      <div className="bg-muted/40 p-2.5 rounded border border-border/60 text-xs space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Transfer Amount:</span>
+                          <span className="font-semibold">Ks {(parseFloat(transferAmount) || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Transfer Fee:</span>
+                          <span className="font-semibold text-rose-600">Ks {transferFeeAmount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between border-t border-border/60 pt-1 text-sm font-bold mt-1">
+                          <span>Total Source Deduction:</span>
+                          <span className="text-primary">Ks {((parseFloat(transferAmount) || 0) + transferFeeAmount).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <RequiredLabel htmlFor="transferReason" required>
+                        Reason / Note
+                      </RequiredLabel>
+                      <Input
+                        id="transferReason"
+                        placeholder="E.g., Float rebalancing, settlement"
+                        value={transferReason}
+                        onChange={(e) => setTransferReason(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <DialogFooter className="pt-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setTransferDialogOpen(false)}
+                        disabled={transferring}
+                      >
+                        Cancel
+                      </Button>
+                      <Button type="submit" disabled={transferring}>
+                        {transferring ? "Transferring..." : "Confirm Transfer"}
                       </Button>
                     </DialogFooter>
                   </form>
@@ -995,16 +1282,23 @@ export default function AccountsPage() {
                           <TableCell className="font-semibold capitalize">
                             {adj.accountName}
                           </TableCell>
-                          <TableCell>
-                            {adj.type === "in" ? (
-                              <Badge className="bg-emerald-100 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400 border-none font-sans font-normal gap-1">
-                                <ArrowUpRight className="h-3 w-3" /> Cash In
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-rose-100 hover:bg-rose-100 text-rose-800 dark:bg-rose-950/30 dark:text-rose-400 border-none font-sans font-normal gap-1">
-                                <ArrowDownLeft className="h-3 w-3" /> Cash Out
-                              </Badge>
-                            )}
+                           <TableCell>
+                            <div className="flex flex-col gap-1 items-start">
+                              {adj.type === "in" ? (
+                                <Badge className="bg-emerald-100 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400 border-none font-sans font-normal gap-1">
+                                  <ArrowUpRight className="h-3 w-3" /> Cash In
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-rose-100 hover:bg-rose-100 text-rose-800 dark:bg-rose-950/30 dark:text-rose-400 border-none font-sans font-normal gap-1">
+                                  <ArrowDownLeft className="h-3 w-3" /> Cash Out
+                                </Badge>
+                              )}
+                              {adj.isTransfer && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-purple-50 text-purple-700 border-purple-200 font-sans font-normal dark:bg-purple-950/20 dark:text-purple-400 dark:border-purple-800/30">
+                                  Transfer
+                                </Badge>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-semibold">
                             Ks {adj.amount.toLocaleString()}
@@ -1030,7 +1324,8 @@ export default function AccountsPage() {
                                 size="icon"
                                 variant="outline"
                                 className="h-8 w-8 text-primary border-border"
-                                title="Edit Adjustment"
+                                disabled={adj.isTransfer}
+                                title={adj.isTransfer ? "Transfers cannot be edited" : "Edit Adjustment"}
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -1039,7 +1334,7 @@ export default function AccountsPage() {
                                 size="icon"
                                 variant="outline"
                                 className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
-                                title="Delete Adjustment"
+                                title={adj.isTransfer ? "Delete Transfer (Revert Both)" : "Delete Adjustment"}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -1228,8 +1523,8 @@ export default function AccountsPage() {
       <ConfirmDialog
         open={deleteAdjConfirmOpen}
         onOpenChange={setDeleteAdjConfirmOpen}
-        title="Delete Account Adjustment"
-        description="Are you sure you want to permanently delete this balance adjustment? The account balance will be reverted to reflect this deletion."
+        title={adjIdToDelete && adjustments.find(a => a.id === adjIdToDelete)?.isTransfer ? "Delete Transfer Record" : "Delete Account Adjustment"}
+        description={deleteDescription}
         onConfirm={handleConfirmDeleteAdjustment}
         loading={deletingAdj}
       />

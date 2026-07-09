@@ -30,6 +30,14 @@ export interface AccountAdjustment {
   createdByEmail: string;
   createdAt: string;
   date: string;
+  isTransfer?: boolean;
+  transferGroupId?: string;
+  counterpartyAccountId?: string;
+  counterpartyAccountName?: string;
+  transferFee?: number;
+  transferFeeType?: "none" | "percent" | "fixed";
+  transferFeeRate?: number;
+  rawTransferAmount?: number;
 }
 
 export interface Installment {
@@ -761,32 +769,157 @@ export async function updateAdjustmentTransaction(
 }
 
 /**
- * Deletes an account adjustment record and reverts its effect on the account balance.
+ * Transfers funds from one account to another and logs the transaction as two adjustments.
  */
-export async function deleteAdjustmentTransaction(adjustmentId: string, adjData: any) {
-  await runTransaction(db, async (transaction) => {
-    const adjRef = doc(db, "account_adjustments", adjustmentId);
-    const accountId = adjData.accountId;
+export async function transferAccountFunds(
+  sourceAccountId: string,
+  targetAccountId: string,
+  amount: number,
+  reason: string,
+  createdBy: string,
+  createdByEmail: string,
+  transferFeeType: "none" | "percent" | "fixed" = "none",
+  transferFeeRate: number = 0,
+  transferFeeAmount: number = 0
+) {
+  if (sourceAccountId === targetAccountId) {
+    throw new Error("Source and target accounts must be different.");
+  }
+  if (amount <= 0) {
+    throw new Error("Transfer amount must be a positive number.");
+  }
+  if (transferFeeAmount < 0) {
+    throw new Error("Transfer fee cannot be negative.");
+  }
 
-    if (accountId) {
-      const accountRef = doc(db, "accounts", accountId);
-      const accountSnap = await transaction.get(accountRef);
-      if (accountSnap.exists()) {
-        const accountData = accountSnap.data();
-        let newBalance = accountData.currentBalance || 0;
-        // Revert effect
-        if (adjData.type === "in") {
-          newBalance -= (adjData.amount || 0);
-        } else {
-          newBalance += (adjData.amount || 0);
-        }
-        transaction.update(accountRef, {
-          currentBalance: newBalance
-        });
-      }
+  const totalDeduction = amount + transferFeeAmount;
+
+  await runTransaction(db, async (transaction) => {
+    const sourceRef = doc(db, "accounts", sourceAccountId);
+    const targetRef = doc(db, "accounts", targetAccountId);
+
+    const sourceSnap = await transaction.get(sourceRef);
+    const targetSnap = await transaction.get(targetRef);
+
+    if (!sourceSnap.exists()) {
+      throw new Error("Source account does not exist.");
+    }
+    if (!targetSnap.exists()) {
+      throw new Error("Target account does not exist.");
     }
 
-    transaction.delete(adjRef);
+    const sourceData = sourceSnap.data();
+    const targetData = targetSnap.data();
+
+    if ((sourceData.currentBalance || 0) < totalDeduction) {
+      throw new Error(
+        `Insufficient funds in ${sourceData.name}. Available balance is Ks ${sourceData.currentBalance.toLocaleString()}. Required deduction (including fee) is Ks ${totalDeduction.toLocaleString()}.`
+      );
+    }
+
+    const sourceNewBalance = (sourceData.currentBalance || 0) - totalDeduction;
+    const targetNewBalance = (targetData.currentBalance || 0) + amount;
+
+    const adjustmentsCollectionRef = collection(db, "account_adjustments");
+    const sourceAdjRef = doc(adjustmentsCollectionRef);
+    const targetAdjRef = doc(adjustmentsCollectionRef);
+
+    const transferGroupId = `tr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    transaction.update(sourceRef, {
+      currentBalance: sourceNewBalance
+    });
+    transaction.update(targetRef, {
+      currentBalance: targetNewBalance
+    });
+
+    const feeText = transferFeeAmount > 0 ? ` (Fee: Ks ${transferFeeAmount.toLocaleString()})` : "";
+
+    // 1. Source account adjustment (Cash Out)
+    transaction.set(sourceAdjRef, {
+      accountId: sourceAccountId,
+      accountName: sourceData.name,
+      type: "out",
+      amount: totalDeduction,
+      reason: `Transfer to ${targetData.name}: ${reason.trim()}${feeText}`,
+      createdBy,
+      createdByEmail,
+      createdAt: new Date().toISOString(),
+      date: new Date().toISOString().split("T")[0],
+      transferGroupId,
+      isTransfer: true,
+      counterpartyAccountId: targetAccountId,
+      counterpartyAccountName: targetData.name,
+      transferFee: transferFeeAmount,
+      transferFeeType,
+      transferFeeRate,
+      rawTransferAmount: amount
+    });
+
+    // 2. Target account adjustment (Cash In)
+    transaction.set(targetAdjRef, {
+      accountId: targetAccountId,
+      accountName: targetData.name,
+      type: "in",
+      amount: amount,
+      reason: `Transfer from ${sourceData.name}: ${reason.trim()}${feeText}`,
+      createdBy,
+      createdByEmail,
+      createdAt: new Date().toISOString(),
+      date: new Date().toISOString().split("T")[0],
+      transferGroupId,
+      isTransfer: true,
+      counterpartyAccountId: sourceAccountId,
+      counterpartyAccountName: sourceData.name,
+      transferFee: transferFeeAmount,
+      transferFeeType,
+      transferFeeRate,
+      rawTransferAmount: amount
+    });
+  });
+}
+
+/**
+ * Deletes an account adjustment record and reverts its effect on the account balance.
+ * If it is a transfer adjustment, it deletes both linked adjustments.
+ */
+export async function deleteAdjustmentTransaction(adjustmentId: string, adjData: any) {
+  let partnerAdjustments: any[] = [];
+  if (adjData.isTransfer && adjData.transferGroupId) {
+    const q = query(
+      collection(db, "account_adjustments"),
+      where("transferGroupId", "==", adjData.transferGroupId)
+    );
+    const snap = await getDocs(q);
+    partnerAdjustments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } else {
+    partnerAdjustments = [{ id: adjustmentId, ...adjData }];
+  }
+
+  await runTransaction(db, async (transaction) => {
+    for (const adj of partnerAdjustments) {
+      const adjRef = doc(db, "account_adjustments", adj.id);
+      const accountId = adj.accountId;
+
+      if (accountId) {
+        const accountRef = doc(db, "accounts", accountId);
+        const accountSnap = await transaction.get(accountRef);
+        if (accountSnap.exists()) {
+          const accountData = accountSnap.data();
+          let newBalance = accountData.currentBalance || 0;
+          // Revert effect
+          if (adj.type === "in") {
+            newBalance -= (adj.amount || 0);
+          } else {
+            newBalance += (adj.amount || 0);
+          }
+          transaction.update(accountRef, {
+            currentBalance: newBalance
+          });
+        }
+      }
+      transaction.delete(adjRef);
+    }
   });
 }
 

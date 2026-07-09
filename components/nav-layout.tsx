@@ -65,7 +65,7 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="fixed inset-0 flex overflow-hidden bg-background">
       {/* Sidebar for Desktop */}
       <aside className="hidden md:flex md:w-64 md:flex-col border-r border-border bg-card">
         <div className="flex h-16 items-center px-6 border-b border-border justify-between">
@@ -117,7 +117,7 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
       </aside>
 
       {/* Main content area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
         {/* Top Navbar */}
         <header className="flex h-16 items-center justify-between px-4 border-b border-border bg-card md:px-6">
           <div className="flex items-center gap-2">
@@ -147,7 +147,7 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
         </header>
 
         {/* Dynamic content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-muted/30">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-muted/30">
           {children}
         </main>
       </div>

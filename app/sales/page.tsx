@@ -135,7 +135,9 @@ export default function SalesPage() {
   const [savingDiscount, setSavingDiscount] = useState(false);
 
   // Predefined Services states
-  const [servicesCatalog, setServicesCatalog] = useState<ServiceCatalogItem[]>([]);
+  const [servicesCatalog, setServicesCatalog] = useState<ServiceCatalogItem[]>(
+    [],
+  );
   const [manageServicesOpen, setManageServicesOpen] = useState(false);
   const [newServiceName, setNewServiceName] = useState("");
   const [newServiceType, setNewServiceType] = useState("Mentorship");
@@ -157,7 +159,7 @@ export default function SalesPage() {
   const [transactionName, setTransactionName] = useState("");
   const [transactionMethod, setTransactionMethod] = useState<string>("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [visibility, setVisibility] = useState<"Shared" | "Only Me">("Shared");
+  const [visibility, setVisibility] = useState<"Shared" | "Only Me">("Only Me");
   const [saleItems, setSaleItems] = useState<
     { productId: string; price: string; quantity: string }[]
   >([{ productId: "", price: "", quantity: "1" }]);
@@ -1380,10 +1382,7 @@ export default function SalesPage() {
                     </Alert>
                   )}
 
-                  <form
-                    onSubmit={handleAddService}
-                    className="space-y-3"
-                  >
+                  <form onSubmit={handleAddService} className="space-y-3">
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <RequiredLabel htmlFor="newServiceType" required>
@@ -1397,11 +1396,19 @@ export default function SalesPage() {
                             <SelectValue placeholder="Select Type" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Mentorship">Mentorship</SelectItem>
-                            <SelectItem value="Zoom Class">Zoom Class</SelectItem>
+                            <SelectItem value="Mentorship">
+                              Mentorship
+                            </SelectItem>
+                            <SelectItem value="Zoom Class">
+                              Zoom Class
+                            </SelectItem>
                             <SelectItem value="Support">Support</SelectItem>
-                            <SelectItem value="1 on 1 Class">1 on 1 Class</SelectItem>
-                            <SelectItem value="Custom">Custom / Other</SelectItem>
+                            <SelectItem value="1 on 1 Class">
+                              1 on 1 Class
+                            </SelectItem>
+                            <SelectItem value="Custom">
+                              Custom / Other
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1462,9 +1469,12 @@ export default function SalesPage() {
                             className="flex justify-between items-center bg-muted/40 p-2 rounded border border-border"
                           >
                             <div className="flex flex-col">
-                              <span className="font-medium text-xs sm:text-sm">{s.name}</span>
+                              <span className="font-medium text-xs sm:text-sm">
+                                {s.name}
+                              </span>
                               <span className="text-[10px] text-muted-foreground">
-                                {s.serviceType} • {s.basePrice.toLocaleString()} Ks
+                                {s.serviceType} • {s.basePrice.toLocaleString()}{" "}
+                                Ks
                               </span>
                             </div>
                             <Button
@@ -1839,11 +1849,15 @@ export default function SalesPage() {
                           <Select
                             onValueChange={(val) => {
                               if (val !== "custom") {
-                                const selected = servicesCatalog.find((s) => s.id === val);
+                                const selected = servicesCatalog.find(
+                                  (s) => s.id === val,
+                                );
                                 if (selected) {
                                   setServiceType(selected.serviceType);
                                   setServiceName(selected.name);
-                                  setServicePrice(selected.basePrice.toString());
+                                  setServicePrice(
+                                    selected.basePrice.toString(),
+                                  );
                                 }
                               }
                             }}
@@ -1852,10 +1866,13 @@ export default function SalesPage() {
                               <SelectValue placeholder="Select a saved service template to autofill" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="custom">Custom (Create from scratch)</SelectItem>
+                              <SelectItem value="custom">
+                                Custom (Create from scratch)
+                              </SelectItem>
                               {servicesCatalog.map((s) => (
                                 <SelectItem key={s.id} value={s.id}>
-                                  {s.name} ({s.serviceType} - Ks {s.basePrice.toLocaleString()})
+                                  {s.name} ({s.serviceType} - Ks{" "}
+                                  {s.basePrice.toLocaleString()})
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -2218,7 +2235,7 @@ export default function SalesPage() {
           </div>
         </div>
         <Card className="border border-border shadow-sm">
-          <CardHeader className="p-4 sm:p-6 border-b border-border">
+          <CardHeader className="p-2 sm:p-6 border-b border-border">
             <CardTitle className="text-md font-bold font-sans">
               Sales Log
             </CardTitle>
@@ -2241,7 +2258,7 @@ export default function SalesPage() {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Customer</TableHead>
-                    <TableHead>Email</TableHead>
+                    <TableHead>Products</TableHead>
                     <TableHead>Transaction</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead className="text-right">Total Amount</TableHead>
@@ -2260,7 +2277,17 @@ export default function SalesPage() {
                       <TableCell className="font-medium">
                         {sale.customerSocialName || "-"}
                       </TableCell>
-                      <TableCell>{sale.customerEmail}</TableCell>
+                      <TableCell className="max-w-[150px] truncate" title={sale.saleType === "service" ? sale.serviceName : sale.products?.map((p) => p.name).join(", ")}>
+                        {sale.saleType === "service" ? (
+                          sale.serviceName || "-"
+                        ) : sale.products && sale.products.length > 0 ? (
+                          sale.products.length > 1
+                            ? `${sale.products[0].name} ..`
+                            : sale.products[0].name
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
                           <span className="font-medium">
@@ -2770,11 +2797,15 @@ export default function SalesPage() {
                       <Select
                         onValueChange={(val) => {
                           if (val !== "custom") {
-                            const selected = servicesCatalog.find((s) => s.id === val);
+                            const selected = servicesCatalog.find(
+                              (s) => s.id === val,
+                            );
                             if (selected) {
                               setEditServiceType(selected.serviceType);
                               setEditServiceName(selected.name);
-                              setEditServicePrice(selected.basePrice.toString());
+                              setEditServicePrice(
+                                selected.basePrice.toString(),
+                              );
                             }
                           }
                         }}
@@ -2783,10 +2814,13 @@ export default function SalesPage() {
                           <SelectValue placeholder="Select a saved service template to autofill" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="custom">Custom (Create from scratch)</SelectItem>
+                          <SelectItem value="custom">
+                            Custom (Create from scratch)
+                          </SelectItem>
                           {servicesCatalog.map((s) => (
                             <SelectItem key={s.id} value={s.id}>
-                              {s.name} ({s.serviceType} - Ks {s.basePrice.toLocaleString()})
+                              {s.name} ({s.serviceType} - Ks{" "}
+                              {s.basePrice.toLocaleString()})
                             </SelectItem>
                           ))}
                         </SelectContent>
