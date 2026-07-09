@@ -50,6 +50,7 @@ import {
   ArrowUpRight,
   Banknote,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   ResponsiveContainer,
   BarChart,
@@ -256,27 +257,44 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
   const sharedRevenues = sharedSalesVal - sharedExpensesVal;
   const privateRevenues = privateSalesVal - privateExpensesVal;
 
-  // Most Selling Products
-  const productCounts: {
-    [id: string]: { name: string; quantity: number; revenue: number };
+  // Top Selling Items / Popular Offerings
+  const itemCounts: {
+    [id: string]: { name: string; quantity: number; revenue: number; category: "product" | "service" };
   } = {};
+
   filteredSales.forEach((sale) => {
-    if (sale.products) {
-      sale.products.forEach((p) => {
-        if (!productCounts[p.productId]) {
-          productCounts[p.productId] = {
-            name: p.name,
-            quantity: 0,
-            revenue: 0,
-          };
-        }
-        productCounts[p.productId].quantity += p.quantity;
-        productCounts[p.productId].revenue += p.price * p.quantity;
-      });
+    if (sale.saleType === "service") {
+      const serviceKey = `service-${sale.serviceName || sale.serviceType || "Unknown Service"}`;
+      if (!itemCounts[serviceKey]) {
+        itemCounts[serviceKey] = {
+          name: sale.serviceName || sale.serviceType || "Unknown Service",
+          quantity: 0,
+          revenue: 0,
+          category: "service",
+        };
+      }
+      itemCounts[serviceKey].quantity += 1;
+      itemCounts[serviceKey].revenue += sale.total;
+    } else {
+      if (sale.products) {
+        sale.products.forEach((p) => {
+          const productKey = `product-${p.productId}`;
+          if (!itemCounts[productKey]) {
+            itemCounts[productKey] = {
+              name: p.name,
+              quantity: 0,
+              revenue: 0,
+              category: "product",
+            };
+          }
+          itemCounts[productKey].quantity += p.quantity;
+          itemCounts[productKey].revenue += p.price * p.quantity;
+        });
+      }
     }
   });
 
-  const topProducts = Object.values(productCounts)
+  const topProducts = Object.values(itemCounts)
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 5);
 
@@ -1169,26 +1187,26 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
 
-              {/* Top Products */}
+              {/* Top Selling Items */}
               <Card className="border-border shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-md font-sans">
-                    Top Selling Products
+                    Top Selling Items
                   </CardTitle>
                   <CardDescription className="text-xs font-sans font-normal">
-                    Most purchased items by volume.
+                    Most purchased offerings and services by volume.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
                   {metrics.topProducts.length === 0 ? (
                     <div className="flex h-[200px] items-center justify-center text-muted-foreground text-sm font-sans">
-                      No products sold in this period.
+                      No items sold in this period.
                     </div>
                   ) : (
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Product</TableHead>
+                          <TableHead>Item</TableHead>
                           <TableHead className="text-center">Qty</TableHead>
                           <TableHead className="text-right">Revenue</TableHead>
                         </TableRow>
@@ -1196,8 +1214,19 @@ export default function DashboardPage() {
                       <TableBody>
                         {metrics.topProducts.map((p, index) => (
                           <TableRow key={index}>
-                            <TableCell className="font-medium max-w-[120px] truncate">
-                              {p.name}
+                            <TableCell className="font-medium max-w-[160px] truncate">
+                              <div className="flex items-center gap-2">
+                                <span className="truncate">{p.name}</span>
+                                {p.category === "service" ? (
+                                  <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-800 dark:bg-purple-950/40 dark:text-purple-400 border-none font-sans font-normal text-[10px] py-0 px-1.5 h-4 shrink-0">
+                                    Service
+                                  </Badge>
+                                ) : (
+                                  <Badge className="bg-blue-100 hover:bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-400 border-none font-sans font-normal text-[10px] py-0 px-1.5 h-4 shrink-0">
+                                    Product
+                                  </Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell className="text-center font-sans">
                               {p.quantity}
