@@ -72,6 +72,20 @@ import {
   transferAccountFunds,
 } from "@/lib/accounts-db";
 
+const TooltipHelper = ({ content }: { content: string }) => {
+  return (
+    <span className="group relative inline-block cursor-help ml-1 font-normal font-sans">
+      <span className="inline-flex items-center justify-center h-3 w-3 rounded-full bg-muted text-[2px] text-muted-foreground hover:bg-accent hover:text-accent-foreground border border-border">
+        ?
+      </span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-popover text-popover-foreground text-[10px] rounded border border-border shadow-md z-100 normal-case leading-normal text-center font-normal">
+        {content}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-popover" />
+      </span>
+    </span>
+  );
+};
+
 export default function AccountsPage() {
   const { profile } = useAuth();
   const router = useRouter();
@@ -114,7 +128,9 @@ export default function AccountsPage() {
   const [transferReason, setTransferReason] = useState("");
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
-  const [transferFeeType, setTransferFeeType] = useState<"none" | "percent" | "fixed">("none");
+  const [transferFeeType, setTransferFeeType] = useState<
+    "none" | "percent" | "fixed"
+  >("none");
   const [transferFeeRate, setTransferFeeRate] = useState("0");
   const [transferFeeAmount, setTransferFeeAmount] = useState(0);
 
@@ -134,6 +150,8 @@ export default function AccountsPage() {
 
   // Expenses state
   const [expenses, setExpenses] = useState<any[]>([]);
+  // Sales state
+  const [sales, setSales] = useState<any[]>([]);
 
   // Edit Adjustment Modal Fields
   const [editAdjOpen, setEditAdjOpen] = useState(false);
@@ -224,10 +242,27 @@ export default function AccountsPage() {
       },
     );
 
+    // Sales subscription
+    const salesQuery = query(collection(db, "sales"));
+    const unsubSales = onSnapshot(
+      salesQuery,
+      (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() });
+        });
+        setSales(list);
+      },
+      (err) => {
+        console.error("Sales snapshot error:", err);
+      },
+    );
+
     return () => {
       unsubAccounts();
       unsubAdjustments();
       unsubExpenses();
+      unsubSales();
     };
   }, [profile]);
 
@@ -283,6 +318,33 @@ export default function AccountsPage() {
     });
     return map;
   }, [accounts, expenses, adjustments]);
+
+  const cashInByAccount = useMemo(() => {
+    const map: { [key: string]: number } = {};
+    accounts.forEach((acc) => {
+      let accSalesIncome = 0;
+      sales.forEach((sale) => {
+        if (sale.saleType === "service" && sale.installments) {
+          sale.installments.forEach((inst: any) => {
+            if (inst.status === "Paid" && inst.accountId === acc.id) {
+              accSalesIncome += inst.amount || 0;
+            }
+          });
+        } else {
+          if (sale.accountId === acc.id) {
+            accSalesIncome += sale.total || 0;
+          }
+        }
+      });
+
+      const accInAdjustments = adjustments
+        .filter((adj) => adj.accountId === acc.id && adj.type === "in")
+        .reduce((sum, adj) => sum + (adj.amount || 0), 0);
+
+      map[acc.id] = accSalesIncome + accInAdjustments;
+    });
+    return map;
+  }, [accounts, sales, adjustments]);
 
   const deleteDescription = useMemo(() => {
     if (!adjIdToDelete) return "";
@@ -410,7 +472,7 @@ export default function AccountsPage() {
     const sourceAcc = accounts.find((a) => a.id === transferSourceAccountId);
     if (sourceAcc && (sourceAcc.currentBalance || 0) < totalDeduction) {
       setTransferError(
-        `Insufficient funds in ${sourceAcc.name}. Available balance is Ks ${sourceAcc.currentBalance.toLocaleString()}. Required deduction (including fee) is Ks ${totalDeduction.toLocaleString()}.`
+        `Insufficient funds in ${sourceAcc.name}. Available balance is Ks ${sourceAcc.currentBalance.toLocaleString()}. Required deduction (including fee) is Ks ${totalDeduction.toLocaleString()}.`,
       );
       return;
     }
@@ -426,7 +488,7 @@ export default function AccountsPage() {
         profile?.email || "",
         transferFeeType,
         parseFloat(transferFeeRate) || 0,
-        transferFeeAmount
+        transferFeeAmount,
       );
       // Reset & close
       setTransferAmount("");
@@ -838,7 +900,9 @@ export default function AccountsPage() {
                         </RequiredLabel>
                         <Select
                           value={transferFeeType}
-                          onValueChange={(val: "none" | "percent" | "fixed") => {
+                          onValueChange={(
+                            val: "none" | "percent" | "fixed",
+                          ) => {
                             setTransferFeeType(val);
                             setTransferFeeRate("0");
                           }}
@@ -848,15 +912,21 @@ export default function AccountsPage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">No Fee</SelectItem>
-                            <SelectItem value="percent">Percentage (%)</SelectItem>
-                            <SelectItem value="fixed">Fixed Amount (Ks)</SelectItem>
+                            <SelectItem value="percent">
+                              Percentage (%)
+                            </SelectItem>
+                            <SelectItem value="fixed">
+                              Fixed Amount (Ks)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
 
                       <div className="space-y-1">
                         <RequiredLabel htmlFor="transferFeeRate">
-                          {transferFeeType === "percent" ? "Rate (%)" : "Fee (Ks)"}
+                          {transferFeeType === "percent"
+                            ? "Rate (%)"
+                            : "Fee (Ks)"}
                         </RequiredLabel>
                         <Input
                           id="transferFeeRate"
@@ -874,16 +944,31 @@ export default function AccountsPage() {
                     {transferFeeType !== "none" && (
                       <div className="bg-muted/40 p-2.5 rounded border border-border/60 text-xs space-y-1">
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Transfer Amount:</span>
-                          <span className="font-semibold">Ks {(parseFloat(transferAmount) || 0).toLocaleString()}</span>
+                          <span className="text-muted-foreground">
+                            Transfer Amount:
+                          </span>
+                          <span className="font-semibold">
+                            Ks{" "}
+                            {(parseFloat(transferAmount) || 0).toLocaleString()}
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Transfer Fee:</span>
-                          <span className="font-semibold text-rose-600">Ks {transferFeeAmount.toLocaleString()}</span>
+                          <span className="text-muted-foreground">
+                            Transfer Fee:
+                          </span>
+                          <span className="font-semibold text-rose-600">
+                            Ks {transferFeeAmount.toLocaleString()}
+                          </span>
                         </div>
                         <div className="flex justify-between border-t border-border/60 pt-1 text-sm font-bold mt-1">
                           <span>Total Source Deduction:</span>
-                          <span className="text-primary">Ks {((parseFloat(transferAmount) || 0) + transferFeeAmount).toLocaleString()}</span>
+                          <span className="text-primary">
+                            Ks{" "}
+                            {(
+                              (parseFloat(transferAmount) || 0) +
+                              transferFeeAmount
+                            ).toLocaleString()}
+                          </span>
                         </div>
                       </div>
                     )}
@@ -1129,24 +1214,36 @@ export default function AccountsPage() {
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <div className="flex justify-between items-center text-sm border-b border-border/40 pb-1">
-                      <span className="text-muted-foreground">
+                      <span className="text-muted-foreground flex items-center">
                         Initial Balance
+                        <TooltipHelper content="The starting capital/float base when this account was created." />
                       </span>
                       <span className="font-semibold text-muted-foreground">
                         Ks {acc.initialBalance.toLocaleString()}
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-sm border-b border-border/40 pb-1">
-                      <span className="text-muted-foreground font-sans">
+                      <span className="text-muted-foreground font-sans flex items-center">
                         Current Balance
+                        <TooltipHelper content="Initial Balance + Total Cash In - Total Cash Out." />
                       </span>
                       <span className="font-bold text-foreground">
                         Ks {acc.currentBalance.toLocaleString()}
                       </span>
                     </div>
+                    <div className="flex justify-between items-center text-xs border-b border-border/40 pb-1">
+                      <span className="text-muted-foreground flex items-center">
+                        Total Cash In
+                        <TooltipHelper content="Sales income (product sales & paid service installments) + manual cash-in adjustments." />
+                      </span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                        Ks {(cashInByAccount[acc.id] || 0).toLocaleString()}
+                      </span>
+                    </div>
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-muted-foreground">
+                      <span className="text-muted-foreground flex items-center">
                         Total Cash Out
+                        <TooltipHelper content="Operational expenses paid from this account + manual cash-out adjustments." />
                       </span>
                       <span className="font-semibold text-rose-600 dark:text-rose-400">
                         Ks {(cashOutByAccount[acc.id] || 0).toLocaleString()}
@@ -1180,6 +1277,9 @@ export default function AccountsPage() {
                       </TableHead>
                       <TableHead className="text-right">
                         Current Balance
+                      </TableHead>
+                      <TableHead className="text-right">
+                        Total Cash In
                       </TableHead>
                       <TableHead className="text-right">
                         Total Cash Out
@@ -1219,6 +1319,10 @@ export default function AccountsPage() {
                             </TableCell>
                             <TableCell className="text-right font-bold text-foreground">
                               Ks {acc.currentBalance.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                              Ks{" "}
+                              {(cashInByAccount[acc.id] || 0).toLocaleString()}
                             </TableCell>
                             <TableCell className="text-right font-semibold text-rose-600 dark:text-rose-400">
                               Ks{" "}
@@ -1282,7 +1386,7 @@ export default function AccountsPage() {
                           <TableCell className="font-semibold capitalize">
                             {adj.accountName}
                           </TableCell>
-                           <TableCell>
+                          <TableCell>
                             <div className="flex flex-col gap-1 items-start">
                               {adj.type === "in" ? (
                                 <Badge className="bg-emerald-100 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400 border-none font-sans font-normal gap-1">
@@ -1294,7 +1398,10 @@ export default function AccountsPage() {
                                 </Badge>
                               )}
                               {adj.isTransfer && (
-                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-purple-50 text-purple-700 border-purple-200 font-sans font-normal dark:bg-purple-950/20 dark:text-purple-400 dark:border-purple-800/30">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 h-4 bg-purple-50 text-purple-700 border-purple-200 font-sans font-normal dark:bg-purple-950/20 dark:text-purple-400 dark:border-purple-800/30"
+                                >
                                   Transfer
                                 </Badge>
                               )}
@@ -1325,7 +1432,11 @@ export default function AccountsPage() {
                                 variant="outline"
                                 className="h-8 w-8 text-primary border-border"
                                 disabled={adj.isTransfer}
-                                title={adj.isTransfer ? "Transfers cannot be edited" : "Edit Adjustment"}
+                                title={
+                                  adj.isTransfer
+                                    ? "Transfers cannot be edited"
+                                    : "Edit Adjustment"
+                                }
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -1334,7 +1445,11 @@ export default function AccountsPage() {
                                 size="icon"
                                 variant="outline"
                                 className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
-                                title={adj.isTransfer ? "Delete Transfer (Revert Both)" : "Delete Adjustment"}
+                                title={
+                                  adj.isTransfer
+                                    ? "Delete Transfer (Revert Both)"
+                                    : "Delete Adjustment"
+                                }
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -1523,7 +1638,12 @@ export default function AccountsPage() {
       <ConfirmDialog
         open={deleteAdjConfirmOpen}
         onOpenChange={setDeleteAdjConfirmOpen}
-        title={adjIdToDelete && adjustments.find(a => a.id === adjIdToDelete)?.isTransfer ? "Delete Transfer Record" : "Delete Account Adjustment"}
+        title={
+          adjIdToDelete &&
+          adjustments.find((a) => a.id === adjIdToDelete)?.isTransfer
+            ? "Delete Transfer Record"
+            : "Delete Account Adjustment"
+        }
         description={deleteDescription}
         onConfirm={handleConfirmDeleteAdjustment}
         loading={deletingAdj}

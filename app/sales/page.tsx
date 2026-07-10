@@ -578,6 +578,14 @@ export default function SalesPage() {
     !!profile,
   );
 
+  const sortedSales = React.useMemo(() => {
+    return [...sales].sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return (b.createdAt || "").localeCompare(a.createdAt || "");
+    });
+  }, [sales]);
+
   useEffect(() => {
     const fetchProductsCatalog = async () => {
       try {
@@ -1261,7 +1269,7 @@ export default function SalesPage() {
                   Manage Discounts
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[450px]">
+              <DialogContent className="w-[95vw] sm:max-w-[450px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Manage Predefined Discounts</DialogTitle>
                   <DialogDescription>
@@ -1367,7 +1375,7 @@ export default function SalesPage() {
                   Manage Services
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[450px]">
+              <DialogContent className="w-[95vw] sm:max-w-[450px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Manage Service Catalog</DialogTitle>
                   <DialogDescription>
@@ -1505,7 +1513,7 @@ export default function SalesPage() {
                   <Plus className="h-4 w-4" /> Add Sale
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+              <DialogContent className="w-[95vw] sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Add New Sale</DialogTitle>
                   <DialogDescription>
@@ -2014,7 +2022,6 @@ export default function SalesPage() {
                               </div>
                             )}
                           </div>
-
                           <div className="space-y-3">
                             <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider block">
                               Payments Schedule
@@ -2022,75 +2029,79 @@ export default function SalesPage() {
                             {installments.map((inst, idx) => (
                               <div
                                 key={idx}
-                                className="flex flex-col sm:flex-row gap-2 items-start sm:items-end border-b border-border pb-3 sm:pb-0 sm:border-none"
+                                className="border-b border-border pb-3 space-y-2 last:border-b-0 last:pb-0"
                               >
-                                <div className="w-full sm:w-28 text-xs font-semibold text-muted-foreground mb-1 sm:mb-2 self-start sm:self-center">
-                                  Payment #{idx + 1}
+                                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                                  <div className="w-full sm:w-28 text-xs font-semibold text-muted-foreground">
+                                    Payment #{idx + 1}
+                                  </div>
+                                  <div className="flex-1 w-full">
+                                    <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
+                                      Amount (Ks)
+                                    </RequiredLabel>
+                                    <Input
+                                      type="number"
+                                      value={inst.amount}
+                                      onChange={(e) => {
+                                        const newInsts = [...installments];
+                                        newInsts[idx] = {
+                                          ...newInsts[idx],
+                                          amount:
+                                            parseFloat(e.target.value) || 0,
+                                        };
+                                        setInstallments(newInsts);
+                                      }}
+                                      className="w-full text-right animate-none"
+                                      disabled={installmentPlan !== "custom"}
+                                    />
+                                  </div>
+                                  <div className="w-full sm:w-40">
+                                    <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
+                                      Status
+                                    </RequiredLabel>
+                                    <Select
+                                      value={inst.status}
+                                      onValueChange={(
+                                        val: "Paid" | "Pending",
+                                      ) => {
+                                        const newInsts = [...installments];
+                                        const activeAccount = accounts.find(
+                                          (a) => a.id === transactionMethod,
+                                        );
+                                        newInsts[idx] = {
+                                          ...newInsts[idx],
+                                          status: val,
+                                          paidDate:
+                                            val === "Paid" ? date : undefined,
+                                          accountId:
+                                            val === "Paid"
+                                              ? transactionMethod
+                                              : undefined,
+                                          transactionMethod:
+                                            val === "Paid"
+                                              ? activeAccount?.name || ""
+                                              : undefined,
+                                        };
+                                        setInstallments(newInsts);
+                                      }}
+                                    >
+                                      <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Status" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="Paid">
+                                          Paid
+                                        </SelectItem>
+                                        <SelectItem value="Pending">
+                                          Pending
+                                        </SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
                                 </div>
-                                <div className="flex-1 w-full space-y-1 sm:space-y-0">
-                                  <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
-                                    Amount (Ks)
-                                  </RequiredLabel>
-                                  <Input
-                                    type="number"
-                                    value={inst.amount}
-                                    onChange={(e) => {
-                                      const newInsts = [...installments];
-                                      newInsts[idx] = {
-                                        ...newInsts[idx],
-                                        amount: parseFloat(e.target.value) || 0,
-                                      };
-                                      setInstallments(newInsts);
-                                    }}
-                                    className="w-full text-right animate-none"
-                                    disabled={installmentPlan !== "custom"}
-                                  />
-                                </div>
-                                <div className="w-full sm:w-32 space-y-1 sm:space-y-0">
-                                  <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
-                                    Status
-                                  </RequiredLabel>
-                                  <Select
-                                    value={inst.status}
-                                    onValueChange={(
-                                      val: "Paid" | "Pending",
-                                    ) => {
-                                      const newInsts = [...installments];
-                                      const activeAccount = accounts.find(
-                                        (a) => a.id === transactionMethod,
-                                      );
-                                      newInsts[idx] = {
-                                        ...newInsts[idx],
-                                        status: val,
-                                        paidDate:
-                                          val === "Paid" ? date : undefined,
-                                        accountId:
-                                          val === "Paid"
-                                            ? transactionMethod
-                                            : undefined,
-                                        transactionMethod:
-                                          val === "Paid"
-                                            ? activeAccount?.name || ""
-                                            : undefined,
-                                      };
-                                      setInstallments(newInsts);
-                                    }}
-                                  >
-                                    <SelectTrigger className="w-full">
-                                      <SelectValue placeholder="Status" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="Paid">Paid</SelectItem>
-                                      <SelectItem value="Pending">
-                                        Pending
-                                      </SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-
                                 {inst.status === "Paid" && (
-                                  <>
-                                    <div className="w-full sm:w-36 space-y-1 sm:space-y-0">
+                                  <div className="flex flex-col sm:flex-row gap-2 sm:pl-30">
+                                    <div className="flex-1 w-full">
                                       <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
                                         Account
                                       </RequiredLabel>
@@ -2122,7 +2133,7 @@ export default function SalesPage() {
                                         </SelectContent>
                                       </Select>
                                     </div>
-                                    <div className="w-full sm:w-32 space-y-1 sm:space-y-0">
+                                    <div className="w-full sm:w-40">
                                       <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
                                         Paid Date
                                       </RequiredLabel>
@@ -2140,11 +2151,10 @@ export default function SalesPage() {
                                         className="w-full"
                                       />
                                     </div>
-                                  </>
+                                  </div>
                                 )}
                               </div>
                             ))}
-
                             {/* Discrepancy Banner */}
                             {(() => {
                               const instSum = installments.reduce(
@@ -2208,6 +2218,20 @@ export default function SalesPage() {
                         Ks {calculatedTotal.toLocaleString()}
                       </span>
                     </div>
+                    {saleType === "service" && paymentType === "Partial" && (
+                      <div className="flex gap-4 text-base font-bold text-amber-600">
+                        <span>Remaining Amount:</span>
+                        <span>
+                          Ks{" "}
+                          {(() => {
+                            const rem = installments
+                              .filter((inst) => inst.status === "Pending")
+                              .reduce((sum, inst) => sum + inst.amount, 0);
+                            return rem.toLocaleString();
+                          })()}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <DialogFooter className="pt-4 gap-2">
@@ -2248,7 +2272,7 @@ export default function SalesPage() {
               <div className="flex justify-center items-center py-12">
                 <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
               </div>
-            ) : sales.length === 0 ? (
+            ) : sortedSales.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground font-sans text-sm">
                 No sales transactions found.
               </div>
@@ -2269,7 +2293,7 @@ export default function SalesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sales.map((sale) => (
+                  {sortedSales.map((sale) => (
                     <TableRow key={sale.id}>
                       <TableCell className="whitespace-nowrap">
                         {sale.date}
@@ -2277,16 +2301,21 @@ export default function SalesPage() {
                       <TableCell className="font-medium">
                         {sale.customerSocialName || "-"}
                       </TableCell>
-                      <TableCell className="max-w-[150px] truncate" title={sale.saleType === "service" ? sale.serviceName : sale.products?.map((p) => p.name).join(", ")}>
-                        {sale.saleType === "service" ? (
-                          sale.serviceName || "-"
-                        ) : sale.products && sale.products.length > 0 ? (
-                          sale.products.length > 1
-                            ? `${sale.products[0].name} ..`
-                            : sale.products[0].name
-                        ) : (
-                          "-"
-                        )}
+                      <TableCell
+                        className="max-w-[150px] truncate"
+                        title={
+                          sale.saleType === "service"
+                            ? sale.serviceName
+                            : sale.products?.map((p) => p.name).join(", ")
+                        }
+                      >
+                        {sale.saleType === "service"
+                          ? sale.serviceName || "-"
+                          : sale.products && sale.products.length > 0
+                            ? sale.products.length > 1
+                              ? `${sale.products[0].name} ..`
+                              : sale.products[0].name
+                            : "-"}
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
@@ -2435,7 +2464,7 @@ export default function SalesPage() {
               </Table>
             )}
           </CardContent>
-          {!loading && sales.length > 0 && (
+          {!loading && sortedSales.length > 0 && (
             <PaginationControls
               page={page}
               pageSize={pageSize}
@@ -2450,9 +2479,8 @@ export default function SalesPage() {
         </Card>
       </div>
 
-      {/* Edit Sale Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Sale Record</DialogTitle>
             <DialogDescription>
@@ -2467,8 +2495,6 @@ export default function SalesPage() {
                   <AlertDescription>{editFormError}</AlertDescription>
                 </Alert>
               )}
-
-              {/* Sale Type Selector */}
               <div className="space-y-2">
                 <RequiredLabel>Sale Type</RequiredLabel>
                 <Tabs
@@ -2484,7 +2510,6 @@ export default function SalesPage() {
                   </TabsList>
                 </Tabs>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <RequiredLabel htmlFor="editCustomerName">
@@ -2510,7 +2535,6 @@ export default function SalesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <RequiredLabel htmlFor="editTransactionName" required>
@@ -2537,7 +2561,6 @@ export default function SalesPage() {
                   />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <RequiredLabel htmlFor="editCustomerChannel" required>
@@ -2559,7 +2582,6 @@ export default function SalesPage() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 {(editSaleType === "product" ||
                   (editSaleType === "service" &&
                     editPaymentType === "Full")) && (
@@ -2587,7 +2609,6 @@ export default function SalesPage() {
                   </div>
                 )}
               </div>
-
               {profile?.role === "admin" && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -2611,7 +2632,6 @@ export default function SalesPage() {
                   </div>
                 </div>
               )}
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-border pt-4">
                 <div className="space-y-2">
                   <RequiredLabel htmlFor="editDiscountType">
@@ -2647,7 +2667,6 @@ export default function SalesPage() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="space-y-2">
                   <RequiredLabel htmlFor="editDiscountAmount">
                     Discount Amount (Ks)
@@ -2666,7 +2685,6 @@ export default function SalesPage() {
                   />
                 </div>
               </div>
-
               <div className="space-y-2">
                 <RequiredLabel htmlFor="editNote">
                   Note (Optional)
@@ -2678,8 +2696,6 @@ export default function SalesPage() {
                   placeholder="E.g. Special request or customer contact details"
                 />
               </div>
-
-              {/* Conditional Product Form vs Service Form */}
               {editSaleType === "product" ? (
                 <div className="space-y-4 border-t border-border pt-4">
                   <div className="flex justify-between items-center">
@@ -2695,7 +2711,6 @@ export default function SalesPage() {
                       <Plus className="h-3 w-3 mr-1" /> Add Product
                     </Button>
                   </div>
-
                   {productsCatalog.length === 0 ? (
                     <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded border border-yellow-200">
                       No approved products exist. Please add products and
@@ -2730,7 +2745,6 @@ export default function SalesPage() {
                               </SelectContent>
                             </Select>
                           </div>
-
                           <div className="w-full sm:w-40 flex flex-row gap-2">
                             <div className="space-y-1 sm:space-y-0">
                               <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
@@ -2771,7 +2785,6 @@ export default function SalesPage() {
                               />
                             </div>
                           </div>
-
                           <Button
                             type="button"
                             variant="ghost"
@@ -2866,7 +2879,6 @@ export default function SalesPage() {
                       />
                     </div>
                   </div>
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <RequiredLabel htmlFor="editServicePrice" required>
@@ -2904,7 +2916,6 @@ export default function SalesPage() {
                       </Select>
                     </div>
                   </div>
-
                   {editPaymentType === "Partial" && (
                     <div className="space-y-4 border-t border-border/60 pt-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2956,7 +2967,6 @@ export default function SalesPage() {
                           </div>
                         )}
                       </div>
-
                       <div className="space-y-3">
                         <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider block">
                           Payments Schedule
@@ -2964,73 +2974,74 @@ export default function SalesPage() {
                         {editInstallments.map((inst, idx) => (
                           <div
                             key={idx}
-                            className="flex flex-col sm:flex-row gap-2 items-start sm:items-end border-b border-border pb-3 sm:pb-0 sm:border-none"
+                            className="border-b border-border pb-3 space-y-2 last:border-b-0 last:pb-0"
                           >
-                            <div className="w-full sm:w-28 text-xs font-semibold text-muted-foreground mb-1 sm:mb-2 self-start sm:self-center">
-                              Payment #{idx + 1}
+                            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                              <div className="w-full sm:w-28 text-xs font-semibold text-muted-foreground">
+                                Payment #{idx + 1}
+                              </div>
+                              <div className="flex-1 w-full">
+                                <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
+                                  Amount (Ks)
+                                </RequiredLabel>
+                                <Input
+                                  type="number"
+                                  value={inst.amount}
+                                  onChange={(e) => {
+                                    const newInsts = [...editInstallments];
+                                    newInsts[idx] = {
+                                      ...newInsts[idx],
+                                      amount: parseFloat(e.target.value) || 0,
+                                    };
+                                    setEditInstallments(newInsts);
+                                  }}
+                                  className="w-full text-right animate-none"
+                                  disabled={editInstallmentPlan !== "custom"}
+                                />
+                              </div>
+                              <div className="w-full sm:w-40">
+                                <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
+                                  Status
+                                </RequiredLabel>
+                                <Select
+                                  value={inst.status}
+                                  onValueChange={(val: "Paid" | "Pending") => {
+                                    const newInsts = [...editInstallments];
+                                    const activeAccount = accounts.find(
+                                      (a) => a.id === editTransactionMethod,
+                                    );
+                                    newInsts[idx] = {
+                                      ...newInsts[idx],
+                                      status: val,
+                                      paidDate:
+                                        val === "Paid" ? editDate : undefined,
+                                      accountId:
+                                        val === "Paid"
+                                          ? editTransactionMethod
+                                          : undefined,
+                                      transactionMethod:
+                                        val === "Paid"
+                                          ? activeAccount?.name || ""
+                                          : undefined,
+                                    };
+                                    setEditInstallments(newInsts);
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Status" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="Paid">Paid</SelectItem>
+                                    <SelectItem value="Pending">
+                                      Pending
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
-                            <div className="flex-1 w-full space-y-1 sm:space-y-0">
-                              <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
-                                Amount (Ks)
-                              </RequiredLabel>
-                              <Input
-                                type="number"
-                                value={inst.amount}
-                                onChange={(e) => {
-                                  const newInsts = [...editInstallments];
-                                  newInsts[idx] = {
-                                    ...newInsts[idx],
-                                    amount: parseFloat(e.target.value) || 0,
-                                  };
-                                  setEditInstallments(newInsts);
-                                }}
-                                className="w-full text-right animate-none"
-                                disabled={editInstallmentPlan !== "custom"}
-                              />
-                            </div>
-                            <div className="w-full sm:w-32 space-y-1 sm:space-y-0">
-                              <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
-                                Status
-                              </RequiredLabel>
-                              <Select
-                                value={inst.status}
-                                onValueChange={(val: "Paid" | "Pending") => {
-                                  const newInsts = [...editInstallments];
-                                  const activeAccount = accounts.find(
-                                    (a) => a.id === editTransactionMethod,
-                                  );
-                                  newInsts[idx] = {
-                                    ...newInsts[idx],
-                                    status: val,
-                                    paidDate:
-                                      val === "Paid" ? editDate : undefined,
-                                    accountId:
-                                      val === "Paid"
-                                        ? editTransactionMethod
-                                        : undefined,
-                                    transactionMethod:
-                                      val === "Paid"
-                                        ? activeAccount?.name || ""
-                                        : undefined,
-                                  };
-                                  setEditInstallments(newInsts);
-                                }}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Paid">Paid</SelectItem>
-                                  <SelectItem value="Pending">
-                                    Pending
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-
                             {inst.status === "Paid" && (
-                              <>
-                                <div className="w-full sm:w-36 space-y-1 sm:space-y-0">
+                              <div className="flex flex-col sm:flex-row gap-2 sm:pl-30">
+                                <div className="flex-1 w-full">
                                   <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
                                     Account
                                   </RequiredLabel>
@@ -3062,7 +3073,7 @@ export default function SalesPage() {
                                     </SelectContent>
                                   </Select>
                                 </div>
-                                <div className="w-full sm:w-32 space-y-1 sm:space-y-0">
+                                <div className="w-full sm:w-40">
                                   <RequiredLabel className="sm:hidden text-xs text-muted-foreground">
                                     Paid Date
                                   </RequiredLabel>
@@ -3080,12 +3091,10 @@ export default function SalesPage() {
                                     className="w-full"
                                   />
                                 </div>
-                              </>
+                              </div>
                             )}
                           </div>
                         ))}
-
-                        {/* Discrepancy Banner */}
                         {(() => {
                           const instSum = editInstallments.reduce(
                             (sum, inst) => sum + inst.amount,
@@ -3128,7 +3137,6 @@ export default function SalesPage() {
                   )}
                 </div>
               )}
-
               <div className="flex flex-col items-end border-t border-border pt-4 text-sm font-sans space-y-1">
                 <div className="flex gap-4">
                   <span className="text-muted-foreground">Subtotal:</span>
@@ -3148,8 +3156,22 @@ export default function SalesPage() {
                     Ks {editCalculatedTotal.toLocaleString()}
                   </span>
                 </div>
+                {editSaleType === "service" &&
+                  editPaymentType === "Partial" && (
+                    <div className="flex gap-4 text-base font-bold text-amber-600">
+                      <span>Remaining Amount:</span>
+                      <span>
+                        Ks{" "}
+                        {(() => {
+                          const rem = editInstallments
+                            .filter((inst) => inst.status === "Pending")
+                            .reduce((sum, inst) => sum + inst.amount, 0);
+                          return rem.toLocaleString();
+                        })()}
+                      </span>
+                    </div>
+                  )}
               </div>
-
               <DialogFooter className="pt-4 gap-2">
                 <Button
                   type="button"
@@ -3173,17 +3195,14 @@ export default function SalesPage() {
           )}
         </DialogContent>
       </Dialog>
-
-      {/* Sale Detail Viewer Modal */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="sm:max-w-[450px]">
+        <DialogContent className="w-[95vw] sm:max-w-[450px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Sale Details</DialogTitle>
             <DialogDescription>
               Full breakdown for {selectedSale?.customerSocialName || "No Name"}
             </DialogDescription>
           </DialogHeader>
-
           {selectedSale && (
             <div className="space-y-4 py-4 font-sans text-sm">
               <div className="grid grid-cols-2 gap-y-2 border-b border-border pb-3">
@@ -3191,17 +3210,14 @@ export default function SalesPage() {
                 <span className="text-right font-medium">
                   {selectedSale.date}
                 </span>
-
                 <span className="text-muted-foreground">Customer:</span>
                 <span className="text-right font-medium">
                   {selectedSale.customerSocialName || "-"}
                 </span>
-
                 <span className="text-muted-foreground">Customer Email:</span>
                 <span className="text-right font-medium break-all">
                   {selectedSale.customerEmail}
                 </span>
-
                 {selectedSale.customerChannel && (
                   <>
                     <span className="text-muted-foreground">
@@ -3212,18 +3228,15 @@ export default function SalesPage() {
                     </span>
                   </>
                 )}
-
                 <span className="text-muted-foreground">Transaction Name:</span>
                 <span className="text-right font-medium">
                   {selectedSale.transactionName}
                 </span>
-
                 <span className="text-muted-foreground">Method:</span>
                 <span className="text-right font-medium">
                   {selectedSale.transactionMethod}
                 </span>
               </div>
-
               {selectedSale.saleType === "service" ? (
                 <div className="space-y-3">
                   <div>
@@ -3249,70 +3262,73 @@ export default function SalesPage() {
                       </div>
                     </div>
                   </div>
-
                   <div>
                     <span className="font-bold text-xs text-muted-foreground uppercase tracking-wider block mb-1">
                       Installments Checklist
                     </span>
                     <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-                      {selectedSale.installments?.map((inst, idx) => (
-                        <div
-                          key={inst.id}
-                          className="bg-muted/30 p-2.5 rounded border border-border space-y-2"
-                        >
-                          <div className="flex justify-between items-center text-xs sm:text-sm">
-                            <span className="font-medium text-foreground">
-                              Payment #{idx + 1}
-                            </span>
-                            <span className="font-bold text-primary">
-                              Ks {inst.amount.toLocaleString()}
-                            </span>
-                          </div>
-
-                          <div className="flex flex-col gap-2 mt-1">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
+                      {selectedSale.installments?.map(
+                        (inst: any, idx: number) => (
+                          <div
+                            key={inst.id}
+                            className="bg-muted/30 p-2.5 rounded border border-border space-y-2"
+                          >
+                            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                              <div className="w-full sm:w-12 text-xs font-semibold text-muted-foreground">
+                                #{idx + 1}
+                              </div>
+                              <div className="flex-1 text-xs sm:text-sm font-bold text-foreground">
+                                Ks {inst.amount.toLocaleString()}
+                              </div>
+                              <div className="w-full sm:w-32 flex items-center justify-between sm:justify-end gap-2">
                                 {inst.status === "Paid" ? (
                                   <Badge className="bg-green-100 hover:bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400 border-none font-sans font-normal text-[10px] py-0 h-4">
                                     Paid
                                   </Badge>
                                 ) : (
-                                  <Badge className="bg-zinc-100 hover:bg-zinc-100 text-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-400 border-none font-sans font-normal text-[10px] py-0 h-4">
-                                    Pending
-                                  </Badge>
+                                  <>
+                                    <Badge className="bg-zinc-100 hover:bg-zinc-100 text-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-400 border-none font-sans font-normal text-[10px] py-0 h-4">
+                                      Pending
+                                    </Badge>
+                                    {payingInstallmentId !== inst.id && (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          setPayingInstallmentId(inst.id);
+                                          setPayingAccountId(
+                                            accounts[0]?.id || "",
+                                          );
+                                          setPayingDate(
+                                            new Date()
+                                              .toISOString()
+                                              .split("T")[0],
+                                          );
+                                        }}
+                                        className="h-6 text-[10px] px-2 border-emerald-500/30 text-emerald-600 hover:bg-emerald-50/10 hover:text-emerald-500"
+                                      >
+                                        Mark as Paid
+                                      </Button>
+                                    )}
+                                  </>
                                 )}
-                                {inst.status === "Paid" &&
-                                  inst.transactionMethod && (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      via {inst.transactionMethod} (
-                                      {inst.paidDate})
-                                    </span>
-                                  )}
                               </div>
-
-                              {inst.status === "Pending" &&
-                                payingInstallmentId !== inst.id && (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setPayingInstallmentId(inst.id);
-                                      setPayingAccountId(accounts[0]?.id || "");
-                                      setPayingDate(
-                                        new Date().toISOString().split("T")[0],
-                                      );
-                                    }}
-                                    className="h-6 text-[10px] px-2 border-emerald-500/30 text-emerald-600 hover:bg-emerald-50/10 hover:text-emerald-500"
-                                  >
-                                    Mark as Paid
-                                  </Button>
-                                )}
                             </div>
-
+                            {inst.status === "Paid" &&
+                              inst.transactionMethod && (
+                                <div className="flex flex-col sm:flex-row gap-2 sm:pl-12 text-[10px] text-muted-foreground">
+                                  <div className="flex-1">
+                                    Account: {inst.transactionMethod}
+                                  </div>
+                                  <div className="w-full sm:w-32 text-left sm:text-right">
+                                    Paid Date: {inst.paidDate}
+                                  </div>
+                                </div>
+                              )}
                             {inst.status === "Pending" &&
                               payingInstallmentId === inst.id && (
-                                <div className="flex flex-col gap-2 w-full mt-1 border-t border-border/60 pt-2">
+                                <div className="flex flex-col gap-2 w-full mt-1 border-t border-border/60 pt-2 sm:pl-28">
                                   <div className="flex gap-2">
                                     <div className="flex-1">
                                       <Select
@@ -3369,8 +3385,8 @@ export default function SalesPage() {
                                 </div>
                               )}
                           </div>
-                        </div>
-                      ))}
+                        ),
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3414,7 +3430,6 @@ export default function SalesPage() {
                   </div>
                 </div>
               )}
-
               <div className="flex flex-col items-end border-t border-border pt-4 space-y-1">
                 <div className="flex gap-4">
                   <span className="text-muted-foreground">Subtotal:</span>
@@ -3443,10 +3458,31 @@ export default function SalesPage() {
                     Ks {selectedSale.total.toLocaleString()}
                   </span>
                 </div>
+                {selectedSale.saleType === "service" &&
+                  selectedSale.paymentType === "Partial" && (
+                    <div className="flex gap-4 text-base font-bold text-amber-600">
+                      <span>Remaining Amount:</span>
+                      <span>
+                        Ks{" "}
+                        {(() => {
+                          const rem = selectedSale.installments
+                            ? selectedSale.installments
+                                .filter(
+                                  (inst: any) => inst.status === "Pending",
+                                )
+                                .reduce(
+                                  (sum: number, inst: any) => sum + inst.amount,
+                                  0,
+                                )
+                            : 0;
+                          return rem.toLocaleString();
+                        })()}
+                      </span>
+                    </div>
+                  )}
               </div>
             </div>
           )}
-
           <DialogFooter>
             <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
           </DialogFooter>

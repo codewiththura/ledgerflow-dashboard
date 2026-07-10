@@ -168,6 +168,14 @@ export default function ExpensesPage() {
     !!profile,
   );
 
+  const sortedExpenses = React.useMemo(() => {
+    return [...expenses].sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return (b.createdAt || "").localeCompare(a.createdAt || "");
+    });
+  }, [expenses]);
+
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -350,7 +358,7 @@ export default function ExpensesPage() {
                 <Plus className="h-4 w-4" /> Add Expense
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent className="w-[95vw] sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Add New Expense</DialogTitle>
                 <DialogDescription>
@@ -501,7 +509,7 @@ export default function ExpensesPage() {
               <div className="flex justify-center items-center py-12">
                 <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
               </div>
-            ) : expenses.length === 0 ? (
+            ) : sortedExpenses.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground font-sans text-sm">
                 No expenses logged. Add an expense to get started.
               </div>
@@ -522,7 +530,7 @@ export default function ExpensesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {expenses.map((expense) => (
+                  {sortedExpenses.map((expense) => (
                     <TableRow key={expense.id}>
                       <TableCell className="whitespace-nowrap">
                         {expense.date}
@@ -603,7 +611,7 @@ export default function ExpensesPage() {
               </Table>
             )}
           </CardContent>
-          {!loading && expenses.length > 0 && (
+          {!loading && sortedExpenses.length > 0 && (
             <PaginationControls
               page={page}
               pageSize={pageSize}
@@ -620,7 +628,7 @@ export default function ExpensesPage() {
 
       {/* Edit Expense Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="w-[95vw] sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Expense</DialogTitle>
             <DialogDescription>
