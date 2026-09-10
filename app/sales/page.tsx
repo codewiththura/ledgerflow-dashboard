@@ -2436,26 +2436,22 @@ export default function SalesPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {(profile?.role === "admin" || !sale.shared) && (
-                            <Button
-                              onClick={() => handleOpenEdit(sale)}
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-primary border-border"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {profile?.role === "admin" && (
-                            <Button
-                              onClick={() => triggerDelete(sale.id)}
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
+                          <Button
+                            onClick={() => handleOpenEdit(sale)}
+                            size="icon"
+                            variant="outline"
+                            className="h-8 w-8 text-primary border-border"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            onClick={() => triggerDelete(sale.id)}
+                            size="icon"
+                            variant="outline"
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>

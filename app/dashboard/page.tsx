@@ -259,7 +259,12 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
 
   // Top Selling Items / Popular Offerings
   const itemCounts: {
-    [id: string]: { name: string; quantity: number; revenue: number; category: "product" | "service" };
+    [id: string]: {
+      name: string;
+      quantity: number;
+      revenue: number;
+      category: "product" | "service";
+    };
   } = {};
 
   filteredSales.forEach((sale) => {
@@ -321,7 +326,7 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
   };
 };
 
-type FilterType = "week" | "month" | "90days" | "1year" | "custom";
+type FilterType = "1w" | "1m" | "3m" | "1y" | "18m" | "2y" | "3y" | "custom";
 
 export default function DashboardPage() {
   const { profile } = useAuth();
@@ -337,7 +342,7 @@ export default function DashboardPage() {
   const [loadingAdjustments, setLoadingAdjustments] = useState(true);
 
   // Filter State
-  const [filter, setFilter] = useState<FilterType>("month");
+  const [filter, setFilter] = useState<FilterType>("1y");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
@@ -475,17 +480,26 @@ export default function DashboardPage() {
     today.setHours(23, 59, 59, 999);
 
     switch (filter) {
-      case "week":
+      case "1w":
         start.setDate(today.getDate() - 7);
         break;
-      case "month":
+      case "1m":
         start.setDate(today.getDate() - 30);
         break;
-      case "90days":
+      case "3m":
         start.setDate(today.getDate() - 90);
         break;
-      case "1year":
+      case "1y":
         start.setDate(today.getDate() - 365);
+        break;
+      case "18m":
+        start.setDate(today.getDate() - 540);
+        break;
+      case "2y":
+        start.setDate(today.getDate() - 730);
+        break;
+      case "3y":
+        start.setDate(today.getDate() - 1095);
         break;
     }
     start.setHours(0, 0, 0, 0);
@@ -695,10 +709,13 @@ export default function DashboardPage() {
                 <SelectValue placeholder="Select period" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="week">Last 7 Days</SelectItem>
-                <SelectItem value="month">Last 30 Days</SelectItem>
-                <SelectItem value="90days">Last 90 Days</SelectItem>
-                <SelectItem value="1year">Last 1 Year</SelectItem>
+                <SelectItem value="1w">Last 7 Days</SelectItem>
+                <SelectItem value="1m">Last 30 Days</SelectItem>
+                <SelectItem value="3m">Last 90 Days</SelectItem>
+                <SelectItem value="1y">Last 1 Year</SelectItem>
+                <SelectItem value="18m">Last 1.5 Years</SelectItem>
+                <SelectItem value="2y">Last 2 Years</SelectItem>
+                <SelectItem value="3y">Last 3 Years</SelectItem>
                 <SelectItem value="custom">Custom Date</SelectItem>
               </SelectContent>
             </Select>
