@@ -2,11 +2,14 @@
   "name": "ledgerflow",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "export:data": "node --env-file=.env.local --experimental-strip-types scripts/export/run.ts",
+    "test:export": "node --test --experimental-strip-types scripts/export/__tests__/serializer.test.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

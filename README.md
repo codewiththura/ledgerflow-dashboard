@@ -90,3 +90,132 @@ Verify the compiled build output starts locally:
 ```bash
 npm run start
 ```
+
+---
+
+## 📦 Database Export Utility (Strictly Read-Only)
+
+LedgerFlow includes an isolated, strictly **read-only** database export utility designed to dump all backend Firestore records as clean, portable JSON files for backups, migrations, or importing into other applications.
+
+### 🛡️ Safety & Isolation Guarantees
+
+- **Strictly Read-Only Operations**: The export utility solely performs `getDocs(collection(db, ...))` read queries. It contains **zero** database mutation functions (`addDoc`, `setDoc`, `updateDoc`, `deleteDoc`, `writeBatch`, `runTransaction`).
+- **Zero Production Risk**: Safe to run directly against single-database setups without development tiers or backups.
+- **Lossless Data Serialization**: Preserves all Firestore document IDs and standardizes Firestore `Timestamp` / JavaScript `Date` instances into ISO 8601 strings.
+- **Git-Ignored Outputs**: All exports are saved to `/exports/` (configured in `.gitignore`) to protect sensitive financial records from being committed to source control.
+
+### Usage Commands
+
+#### 1. Export All Collections (With User Authentication)
+
+If your Firestore Security Rules require authentication to read records, provide your login email and password:
+
+```bash
+npm run export:data -- --email=your-email@example.com --password=your-password
+```
+
+> [!TIP]
+> Alternatively, you can add `EXPORT_AUTH_EMAIL` and `EXPORT_AUTH_PASSWORD` to your `.env.local` file so you don't have to pass them on the command line every time:
+> ```env
+> EXPORT_AUTH_EMAIL=your-email@example.com
+> EXPORT_AUTH_PASSWORD=your-password
+> ```
+> Then simply run:
+> ```bash
+> npm run export:data
+> ```
+
+#### 2. Export Specific Collections
+
+To export only selected collections, pass the `--collections` flag:
+
+```bash
+# Export only sales and expenses
+npm run export:data -- --collections=sales,expenses
+
+# Export single collection
+npm run export:data -- --collection=accounts
+```
+
+#### 3. Custom Output Directory
+
+Specify a custom directory for the output:
+
+```bash
+npm run export:data -- --outDir=./exports/my-custom-backup
+```
+
+#### 4. Minified / Compact Output
+
+Output compact single-line JSON files instead of 2-space indented files:
+
+```bash
+npm run export:data -- --compact
+```
+
+#### 5. View Help & CLI Options
+
+```bash
+npm run export:data -- --help
+```
+
+
+---
+
+### Output Directory Structure
+
+Each export produces individual collection JSON files, a combined unified JSON file, and an audit manifest:
+
+```
+exports/
+└── export-2026-09-09_22-45-00/
+    ├── manifest.json            # Metadata (counts, timestamps, project ID, file sizes)
+    ├── all-data.json            # All collections merged in one JSON object { [collection]: [...] }
+    ├── accounts.json            # Financial accounts
+    ├── account_adjustments.json # Account balance adjustments
+    ├── sales.json               # Sales orders and itemized records
+    ├── expenses.json            # Expenses records
+    ├── products.json            # Product inventory catalog
+    ├── categories.json          # Product categories
+    ├── services.json            # Services catalog
+    ├── discounts.json           # Discount configurations
+    └── users.json               # User profile records
+```
+
+#### Sample `manifest.json`
+
+```json
+{
+  "version": "1.0.0",
+  "application": "LedgerFlow",
+  "exportedAt": "2026-09-09T16:15:00.000Z",
+  "projectId": "ledgerflow-app",
+  "totalCollections": 9,
+  "totalDocuments": 154,
+  "durationMs": 1420,
+  "collections": {
+    "sales": {
+      "collectionName": "sales",
+      "documentCount": 82,
+      "fileName": "sales.json",
+      "fileSizeBytes": 45820,
+      "durationMs": 310
+    }
+  },
+  "files": {
+    "manifest": "manifest.json",
+    "combinedData": "all-data.json",
+    "collectionFiles": ["accounts.json", "sales.json", "..."]
+  }
+}
+```
+
+---
+
+### Running Unit Tests (Zero Database Contact)
+
+The export serialization and CLI parsing logic includes unit tests that execute in complete isolation without establishing any network or database connections:
+
+```bash
+npm run test:export
+```
