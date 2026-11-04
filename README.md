@@ -16,10 +16,12 @@ A professional, real-time financial performance and ledger dashboard designed to
 
 ## Key Features
 
-- **Performance Analytics**: Visualizes Net Revenue, Total Sales, Total Expenses, and Active Customer Counts over custom or preset periods (Week, Month, Year).
-- **Interactive Revenue Trends**: Powered by dynamic Recharts showing comparative daily sales against operational expenses.
-- **Granular Visibility Controls**: Supports privacy flags (`Shared` vs `Only Me`) for sales and expenses records to manage team-wide vs personal view rights.
-- **Role-Based Views & Permissions**: Configured with user profiles (`admin` vs `moderator` / user view). Both admin and standard user views can view, edit, and delete logged sales and expenses with automatic real-time account balance adjustments, while administrative visibility controls (`Shared` vs `Only Me`) remain reserved for admins.
+- **Performance Analytics**: Visualizes Net Revenue, Total Sales, Custom Incomes, Total Expenses, and Active Customer Counts over custom or preset periods (Week, Month, Year).
+- **Interactive Revenue Trends**: Powered by dynamic Recharts showing comparative daily sales and custom income inflows against operational expenses.
+- **Custom Income & Cash Inflow Tracking**: Dedicated primary page and navigation menu (`/income`) to record custom income amounts (freelance, consulting, investment returns, capital influx) with title, amount, deposit account, date, category, and notes.
+- **Single Source of Truth & ACID Consistency Transitions**: Every financial transition across sales, custom income, expenses, account transfers, and balance adjustments is executed atomically through Firestore `runTransaction` guaranteeing zero balance drift. Account balances can also be fully recalculated and audited strictly from historical source transactions.
+- **Granular Visibility Controls**: Supports privacy flags (`Shared` vs `Only Me`) for sales, custom incomes, and expenses records to manage team-wide vs personal view rights.
+- **Role-Based Views & Permissions**: Configured with user profiles (`admin` vs `moderator` / user view). Both admin and standard user views can view, edit, and delete logged sales, custom incomes, and expenses with automatic real-time account balance adjustments, while administrative visibility controls (`Shared` vs `Only Me`) remain reserved for admins.
 - **Inventory & Transaction Records**: Itemized sales registration, transaction tracking (supporting payment services like KPay / Aya), and customer purchase history.
 - **Optimized UI Components**: Integrated custom, reusable confirmation dialogs, validation labels, and firestore-backed cursor pagination controls.
 
@@ -174,6 +176,7 @@ exports/
     ├── accounts.json            # Financial accounts
     ├── account_adjustments.json # Account balance adjustments
     ├── sales.json               # Sales orders and itemized records
+    ├── incomes.json             # Custom incomes records
     ├── expenses.json            # Expenses records
     ├── products.json            # Product inventory catalog
     ├── categories.json          # Product categories
@@ -190,8 +193,8 @@ exports/
   "application": "LedgerFlow",
   "exportedAt": "2026-09-09T16:15:00.000Z",
   "projectId": "ledgerflow-app",
-  "totalCollections": 9,
-  "totalDocuments": 154,
+  "totalCollections": 10,
+  "totalDocuments": 175,
   "durationMs": 1420,
   "collections": {
     "sales": {
@@ -200,12 +203,19 @@ exports/
       "fileName": "sales.json",
       "fileSizeBytes": 45820,
       "durationMs": 310
+    },
+    "incomes": {
+      "collectionName": "incomes",
+      "documentCount": 21,
+      "fileName": "incomes.json",
+      "fileSizeBytes": 12450,
+      "durationMs": 95
     }
   },
   "files": {
     "manifest": "manifest.json",
     "combinedData": "all-data.json",
-    "collectionFiles": ["accounts.json", "sales.json", "..."]
+    "collectionFiles": ["accounts.json", "sales.json", "incomes.json", "..."]
   }
 }
 ```
@@ -213,6 +223,7 @@ exports/
 ### Running Unit Tests (Zero Database Contact)
 
 The test suites execute in complete isolation without establishing any network or database connections:
+- **Income Validation & Permissions**: Tests input validation (positive amount, required account, title, date) and role permissions (`admin` and `moderator`).
 - **Expense Validation & Permissions**: Tests input validation and role authorization rules.
 - **Export Data Serialization & CLI Argument Parser**: Tests Firestore serialization, timestamp transformations, and CLI option parsing.
 

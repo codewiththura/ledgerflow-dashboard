@@ -375,13 +375,16 @@ export async function updateAccountName(accountId: string, oldName: string, newN
 
   const salesQuery1 = query(collection(db, "sales"), where("accountId", "==", accountId));
   const salesQuery2 = query(collection(db, "sales"), where("transactionMethod", "==", oldName));
-  
   const adjustmentsQuery = query(collection(db, "account_adjustments"), where("accountId", "==", accountId));
+  const incomesQuery = query(collection(db, "incomes"), where("accountId", "==", accountId));
+  const expensesQuery = query(collection(db, "expenses"), where("accountId", "==", accountId));
 
-  const [snap1, snap2, adjSnap] = await Promise.all([
+  const [snap1, snap2, adjSnap, incomesSnap, expensesSnap] = await Promise.all([
     getDocs(salesQuery1),
     getDocs(salesQuery2),
-    getDocs(adjustmentsQuery)
+    getDocs(adjustmentsQuery),
+    getDocs(incomesQuery),
+    getDocs(expensesQuery)
   ]);
 
   const saleDocsMap = new Map();
@@ -434,6 +437,14 @@ export async function updateAccountName(accountId: string, oldName: string, newN
     batch.update(adjDoc.ref, { accountName: normalizedNewName });
   });
 
+  incomesSnap.docs.forEach((incDoc) => {
+    batch.update(incDoc.ref, { accountName: normalizedNewName });
+  });
+
+  expensesSnap.docs.forEach((expDoc) => {
+    batch.update(expDoc.ref, { accountName: normalizedNewName });
+  });
+
   await batch.commit();
 }
 
@@ -446,18 +457,21 @@ export async function recalculateAccountBalances() {
   const salesRef = collection(db, "sales");
   const adjustmentsRef = collection(db, "account_adjustments");
   const expensesRef = collection(db, "expenses");
+  const incomesRef = collection(db, "incomes");
 
-  const [accountsSnap, salesSnap, adjustmentsSnap, expensesSnap] = await Promise.all([
+  const [accountsSnap, salesSnap, adjustmentsSnap, expensesSnap, incomesSnap] = await Promise.all([
     getDocs(accountsRef),
     getDocs(salesRef),
     getDocs(adjustmentsRef),
-    getDocs(expensesRef)
+    getDocs(expensesRef),
+    getDocs(incomesRef)
   ]);
 
   const accounts = accountsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
   const sales = salesSnap.docs.map(doc => ({ id: doc.id, ref: doc.ref, ...doc.data() } as any));
   const adjustments = adjustmentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
   const expenses = expensesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+  const incomes = incomesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
 
   const accountBalances: { [key: string]: number } = {};
   const accountNamesToIds: { [key: string]: string } = {};
@@ -498,6 +512,16 @@ export async function recalculateAccountBalances() {
       if (targetAccountId && accountBalances[targetAccountId] !== undefined) {
         accountBalances[targetAccountId] += (sale.total || 0);
       }
+    }
+  });
+
+  incomes.forEach(inc => {
+    let targetAccountId = inc.accountId;
+    if (!targetAccountId && inc.accountName) {
+      targetAccountId = accountNamesToIds[inc.accountName.toLowerCase()];
+    }
+    if (targetAccountId && accountBalances[targetAccountId] !== undefined) {
+      accountBalances[targetAccountId] += (inc.amount || 0);
     }
   });
 
@@ -668,6 +692,126 @@ export async function deleteExpenseTransaction(expenseId: string, expenseData: a
     }
 
     transaction.delete(expenseRef);
+  });
+}
+
+/**
+ * Records a custom income transaction and adds the amount to the account balance.
+ */
+export async function createIncomeTransaction(incomeData: any, accountId: string) {
+  await runTransaction(db, async (transaction) => {
+    const accountRef = doc(db, "accounts", accountId);
+    const accountSnap = await transaction.get(accountRef);
+    if (!accountSnap.exists()) {
+      throw new Error("Account does not exist.");
+    }
+    const accountData = accountSnap.data();
+    const newBalance = (accountData.currentBalance || 0) + incomeData.amount;
+
+    const incomesCollectionRef = collection(db, "incomes");
+    const newIncomeRef = doc(incomesCollectionRef);
+
+    transaction.set(newIncomeRef, {
+      ...incomeData,
+      accountId,
+      accountName: accountData.name
+    });
+
+    transaction.update(accountRef, {
+      currentBalance: newBalance
+    });
+  });
+}
+
+/**
+ * Updates an income transaction and adjusts account balances accordingly.
+ */
+export async function updateIncomeTransaction(
+  incomeId: string,
+  updatedIncomeData: any,
+  oldIncomeData: any
+) {
+  await runTransaction(db, async (transaction) => {
+    const incomeRef = doc(db, "incomes", incomeId);
+    const oldAccountId = oldIncomeData.accountId;
+    const newAccountId = updatedIncomeData.accountId;
+
+    if (oldAccountId && oldAccountId === newAccountId) {
+      // Same account, update balance by the difference
+      const accountRef = doc(db, "accounts", newAccountId);
+      const accountSnap = await transaction.get(accountRef);
+      if (!accountSnap.exists()) {
+        throw new Error("Account does not exist.");
+      }
+      const accountData = accountSnap.data();
+      const difference = updatedIncomeData.amount - (oldIncomeData.amount || 0);
+      const newBalance = (accountData.currentBalance || 0) + difference;
+
+      transaction.update(incomeRef, {
+        ...updatedIncomeData,
+        accountName: accountData.name
+      });
+      transaction.update(accountRef, {
+        currentBalance: newBalance
+      });
+    } else {
+      // Account changed or old income did not have an accountId
+      let oldAccountSnap = null;
+      if (oldAccountId) {
+        const oldAccountRef = doc(db, "accounts", oldAccountId);
+        oldAccountSnap = await transaction.get(oldAccountRef);
+      }
+
+      const newAccountRef = doc(db, "accounts", newAccountId);
+      const newAccountSnap = await transaction.get(newAccountRef);
+
+      if (oldAccountId && oldAccountSnap && oldAccountSnap.exists()) {
+        const oldAccountData = oldAccountSnap.data();
+        const newOldBalance = (oldAccountData.currentBalance || 0) - (oldIncomeData.amount || 0);
+        const oldAccountRef = doc(db, "accounts", oldAccountId);
+        transaction.update(oldAccountRef, {
+          currentBalance: newOldBalance
+        });
+      }
+
+      if (!newAccountSnap.exists()) {
+        throw new Error("New account does not exist.");
+      }
+      const newAccountData = newAccountSnap.data();
+      const newNewBalance = (newAccountData.currentBalance || 0) + updatedIncomeData.amount;
+
+      transaction.update(incomeRef, {
+        ...updatedIncomeData,
+        accountName: newAccountData.name
+      });
+      transaction.update(newAccountRef, {
+        currentBalance: newNewBalance
+      });
+    }
+  });
+}
+
+/**
+ * Deletes an income transaction and subtracts its amount from the associated account balance.
+ */
+export async function deleteIncomeTransaction(incomeId: string, incomeData: any) {
+  await runTransaction(db, async (transaction) => {
+    const incomeRef = doc(db, "incomes", incomeId);
+    const accountId = incomeData.accountId;
+
+    if (accountId) {
+      const accountRef = doc(db, "accounts", accountId);
+      const accountSnap = await transaction.get(accountRef);
+      if (accountSnap.exists()) {
+        const accountData = accountSnap.data();
+        const newBalance = (accountData.currentBalance || 0) - (incomeData.amount || 0);
+        transaction.update(accountRef, {
+          currentBalance: newBalance
+        });
+      }
+    }
+
+    transaction.delete(incomeRef);
   });
 }
 
@@ -987,11 +1131,15 @@ export async function updateAccountDetails(
     const salesQuery1 = query(collection(db, "sales"), where("accountId", "==", accountId));
     const salesQuery2 = query(collection(db, "sales"), where("transactionMethod", "==", oldName));
     const adjustmentsQuery = query(collection(db, "account_adjustments"), where("accountId", "==", accountId));
+    const incomesQuery = query(collection(db, "incomes"), where("accountId", "==", accountId));
+    const expensesQuery = query(collection(db, "expenses"), where("accountId", "==", accountId));
 
-    const [snap1, snap2, adjSnap] = await Promise.all([
+    const [snap1, snap2, adjSnap, incomesSnap, expensesSnap] = await Promise.all([
       getDocs(salesQuery1),
       getDocs(salesQuery2),
-      getDocs(adjustmentsQuery)
+      getDocs(adjustmentsQuery),
+      getDocs(incomesQuery),
+      getDocs(expensesQuery)
     ]);
 
     const saleDocsMap = new Map();
@@ -1039,6 +1187,14 @@ export async function updateAccountDetails(
 
     adjSnap.docs.forEach((adjDoc) => {
       batch.update(adjDoc.ref, { accountName: normalizedNewName });
+    });
+
+    incomesSnap.docs.forEach((incDoc) => {
+      batch.update(incDoc.ref, { accountName: normalizedNewName });
+    });
+
+    expensesSnap.docs.forEach((expDoc) => {
+      batch.update(expDoc.ref, { accountName: normalizedNewName });
     });
 
     await batch.commit();

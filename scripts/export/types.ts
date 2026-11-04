@@ -7,6 +7,7 @@ export const KNOWN_COLLECTIONS = [
   'accounts',
   'account_adjustments',
   'sales',
+  'incomes',
   'expenses',
   'products',
   'categories',

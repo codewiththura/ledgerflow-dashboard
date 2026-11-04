@@ -120,6 +120,18 @@ interface Expense {
   note?: string;
 }
 
+interface IncomeItem {
+  id: string;
+  title: string;
+  amount: number;
+  date: string;
+  approved?: boolean;
+  shared?: boolean;
+  createdAt: string;
+  incomeType?: "business" | "personal" | "other";
+  note?: string;
+}
+
 interface CompareBadgeProps {
   current: number;
   previous: number;
@@ -181,7 +193,11 @@ function CompareBadge({
   );
 }
 
-const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
+const computeMetrics = (
+  filteredSales: Sale[],
+  filteredExpenses: Expense[],
+  filteredIncomes: IncomeItem[] = []
+) => {
   // Distinct Customers (calculated using sale.transactionName)
   const customerSet = new Set<string>();
   const sharedCustomerSet = new Set<string>();
@@ -219,6 +235,23 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
     }
   });
 
+  // Custom Incomes
+  let totalCustomIncomeVal = 0;
+  let sharedCustomIncomeVal = 0;
+  let privateCustomIncomeVal = 0;
+  filteredIncomes.forEach((inc) => {
+    totalCustomIncomeVal += inc.amount;
+    if (inc.shared === true) {
+      sharedCustomIncomeVal += inc.amount;
+    } else {
+      privateCustomIncomeVal += inc.amount;
+    }
+  });
+
+  const totalInflowVal = totalSalesVal + totalCustomIncomeVal;
+  const sharedInflowVal = sharedSalesVal + sharedCustomIncomeVal;
+  const privateInflowVal = privateSalesVal + privateCustomIncomeVal;
+
   let totalExpensesVal = 0;
   let sharedExpensesVal = 0;
   let privateExpensesVal = 0;
@@ -253,9 +286,9 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
     }
   });
 
-  const revenues = totalSalesVal - totalExpensesVal;
-  const sharedRevenues = sharedSalesVal - sharedExpensesVal;
-  const privateRevenues = privateSalesVal - privateExpensesVal;
+  const revenues = totalInflowVal - totalExpensesVal;
+  const sharedRevenues = sharedInflowVal - sharedExpensesVal;
+  const privateRevenues = privateInflowVal - privateExpensesVal;
 
   // Top Selling Items / Popular Offerings
   const itemCounts: {
@@ -310,6 +343,12 @@ const computeMetrics = (filteredSales: Sale[], filteredExpenses: Expense[]) => {
     totalSales: totalSalesVal,
     sharedSales: sharedSalesVal,
     privateSales: privateSalesVal,
+    totalCustomIncome: totalCustomIncomeVal,
+    sharedCustomIncome: sharedCustomIncomeVal,
+    privateCustomIncome: privateCustomIncomeVal,
+    totalInflow: totalInflowVal,
+    sharedInflow: sharedInflowVal,
+    privateInflow: privateInflowVal,
     totalExpenses: totalExpensesVal,
     sharedExpenses: sharedExpensesVal,
     privateExpenses: privateExpensesVal,
@@ -332,6 +371,7 @@ export default function DashboardPage() {
   const { profile } = useAuth();
   const [sales, setSales] = useState<Sale[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [incomes, setIncomes] = useState<IncomeItem[]>([]);
   const [loadingSales, setLoadingSales] = useState(true);
   const [loadingExpenses, setLoadingExpenses] = useState(true);
 
@@ -375,6 +415,32 @@ export default function DashboardPage() {
       (err) => {
         console.error("Sales snapshot error:", err);
         setLoadingSales(false);
+      },
+    );
+
+    // Incomes Subscription
+    let incomesQuery;
+    if (profile.role === "admin") {
+      incomesQuery = query(collection(db, "incomes"), orderBy("date", "asc"));
+    } else {
+      incomesQuery = query(
+        collection(db, "incomes"),
+        where("shared", "==", true),
+        orderBy("date", "asc"),
+      );
+    }
+
+    const unsubIncomes = onSnapshot(
+      incomesQuery,
+      (snapshot) => {
+        const items: IncomeItem[] = [];
+        snapshot.forEach((doc) => {
+          items.push({ id: doc.id, ...doc.data() } as IncomeItem);
+        });
+        setIncomes(items);
+      },
+      (err) => {
+        console.error("Incomes snapshot error:", err);
       },
     );
 
@@ -457,6 +523,7 @@ export default function DashboardPage() {
 
     return () => {
       unsubSales();
+      unsubIncomes();
       unsubExpenses();
       unsubAccounts?.();
       unsubAdjustments?.();
@@ -520,13 +587,18 @@ export default function DashboardPage() {
       return eDate >= start && eDate <= end;
     });
 
-    return { filteredSales, filteredExpenses };
-  }, [sales, expenses, dateRange]);
+    const filteredIncomes = incomes.filter((income) => {
+      const iDate = new Date(income.date);
+      return iDate >= start && iDate <= end;
+    });
+
+    return { filteredSales, filteredExpenses, filteredIncomes };
+  }, [sales, expenses, incomes, dateRange]);
 
   // Compute Metrics
   const metrics = useMemo(() => {
-    const { filteredSales, filteredExpenses } = filteredData;
-    return computeMetrics(filteredSales, filteredExpenses);
+    const { filteredSales, filteredExpenses, filteredIncomes } = filteredData;
+    return computeMetrics(filteredSales, filteredExpenses, filteredIncomes);
   }, [filteredData]);
 
   // Filter lists based on date range for previous period
@@ -546,13 +618,18 @@ export default function DashboardPage() {
       return eDate >= prevStart && eDate <= prevEnd;
     });
 
-    return { prevFilteredSales, prevFilteredExpenses };
-  }, [sales, expenses, dateRange]);
+    const prevFilteredIncomes = incomes.filter((income) => {
+      const iDate = new Date(income.date);
+      return iDate >= prevStart && iDate <= prevEnd;
+    });
+
+    return { prevFilteredSales, prevFilteredExpenses, prevFilteredIncomes };
+  }, [sales, expenses, incomes, dateRange]);
 
   // Compute Previous Metrics
   const prevMetrics = useMemo(() => {
-    const { prevFilteredSales, prevFilteredExpenses } = previousFilteredData;
-    return computeMetrics(prevFilteredSales, prevFilteredExpenses);
+    const { prevFilteredSales, prevFilteredExpenses, prevFilteredIncomes } = previousFilteredData;
+    return computeMetrics(prevFilteredSales, prevFilteredExpenses, prevFilteredIncomes);
   }, [previousFilteredData]);
 
   const showCompare =
@@ -560,7 +637,7 @@ export default function DashboardPage() {
 
   // Format chart data by day / date
   const chartData = useMemo(() => {
-    const { filteredSales, filteredExpenses } = filteredData;
+    const { filteredSales, filteredExpenses, filteredIncomes } = filteredData;
     const dailyMap: {
       [date: string]: {
         date: string;
@@ -616,6 +693,26 @@ export default function DashboardPage() {
         } else {
           dailyMap[sale.date].privateSales += sale.total;
         }
+      }
+    });
+
+    filteredIncomes.forEach((inc) => {
+      if (!dailyMap[inc.date]) {
+        dailyMap[inc.date] = {
+          date: inc.date,
+          sales: 0,
+          expenses: 0,
+          sharedSales: 0,
+          privateSales: 0,
+          sharedExpenses: 0,
+          privateExpenses: 0,
+        };
+      }
+      dailyMap[inc.date].sales += inc.amount;
+      if (inc.shared === true) {
+        dailyMap[inc.date].sharedSales += inc.amount;
+      } else {
+        dailyMap[inc.date].privateSales += inc.amount;
       }
     });
 
@@ -733,27 +830,30 @@ export default function DashboardPage() {
               <Card className="border-border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <CardTitle className="text-sm font-medium font-sans">
-                    Total Sales
+                    Total Inflow
                   </CardTitle>
                   <TrendingUp className="h-4 w-4 text-green-500" />
                 </CardHeader>
                 <CardContent className="space-y-1.5">
                   <div className="flex flex-col items-baseline gap-2">
                     <span className="text-2xl font-bold font-sans">
-                      Ks {metrics.totalSales.toLocaleString()}
+                      Ks {(metrics.totalInflow || metrics.totalSales).toLocaleString()}
                     </span>
                     {showCompare && (
                       <CompareBadge
-                        current={metrics.totalSales}
-                        previous={prevMetrics.totalSales}
+                        current={metrics.totalInflow || metrics.totalSales}
+                        previous={prevMetrics.totalInflow || prevMetrics.totalSales}
                         isCurrency={true}
                         isExpense={false}
                       />
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground font-sans">
-                    In selected period
-                  </p>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground font-sans">
+                    <span>Sales: Ks {metrics.totalSales.toLocaleString()}</span>
+                    {metrics.totalCustomIncome > 0 && (
+                      <span>• Other: Ks {metrics.totalCustomIncome.toLocaleString()}</span>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 

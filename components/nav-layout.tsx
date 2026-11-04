@@ -7,6 +7,7 @@ import { useAuth } from "@/context/auth-context";
 import {
   LayoutDashboard,
   ShoppingCart,
+  Banknote,
   Package,
   CreditCard,
   Wallet,
@@ -46,6 +47,7 @@ export const NavLayout = ({ children }: { children: React.ReactNode }) => {
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Sales", href: "/sales", icon: ShoppingCart },
+    { name: "Income", href: "/income", icon: Banknote },
     { name: "Products", href: "/products", icon: Package },
     { name: "Expenses", href: "/expenses", icon: CreditCard },
   ];

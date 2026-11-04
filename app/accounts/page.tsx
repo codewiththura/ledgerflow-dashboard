@@ -150,6 +150,8 @@ export default function AccountsPage() {
 
   // Expenses state
   const [expenses, setExpenses] = useState<any[]>([]);
+  // Incomes state
+  const [incomes, setIncomes] = useState<any[]>([]);
   // Sales state
   const [sales, setSales] = useState<any[]>([]);
 
@@ -242,6 +244,22 @@ export default function AccountsPage() {
       },
     );
 
+    // Incomes subscription
+    const incomesQuery = query(collection(db, "incomes"));
+    const unsubIncomes = onSnapshot(
+      incomesQuery,
+      (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() });
+        });
+        setIncomes(list);
+      },
+      (err) => {
+        console.error("Incomes snapshot error:", err);
+      },
+    );
+
     // Sales subscription
     const salesQuery = query(collection(db, "sales"));
     const unsubSales = onSnapshot(
@@ -262,6 +280,7 @@ export default function AccountsPage() {
       unsubAccounts();
       unsubAdjustments();
       unsubExpenses();
+      unsubIncomes();
       unsubSales();
     };
   }, [profile]);
@@ -337,14 +356,18 @@ export default function AccountsPage() {
         }
       });
 
+      const accCustomIncome = incomes
+        .filter((inc) => inc.accountId === acc.id)
+        .reduce((sum, inc) => sum + (inc.amount || 0), 0);
+
       const accInAdjustments = adjustments
         .filter((adj) => adj.accountId === acc.id && adj.type === "in")
         .reduce((sum, adj) => sum + (adj.amount || 0), 0);
 
-      map[acc.id] = accSalesIncome + accInAdjustments;
+      map[acc.id] = accSalesIncome + accCustomIncome + accInAdjustments;
     });
     return map;
-  }, [accounts, sales, adjustments]);
+  }, [accounts, sales, incomes, adjustments]);
 
   const deleteDescription = useMemo(() => {
     if (!adjIdToDelete) return "";
@@ -1234,7 +1257,7 @@ export default function AccountsPage() {
                     <div className="flex justify-between items-center text-xs border-b border-border/40 pb-1">
                       <span className="text-muted-foreground flex items-center">
                         Total Cash In
-                        <TooltipHelper content="Sales income (product sales & paid service installments) + manual cash-in adjustments." />
+                        <TooltipHelper content="Sales income (product sales & paid service installments) + custom income + manual cash-in adjustments." />
                       </span>
                       <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                         Ks {(cashInByAccount[acc.id] || 0).toLocaleString()}
