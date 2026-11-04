@@ -19,7 +19,7 @@ A professional, real-time financial performance and ledger dashboard designed to
 - **Performance Analytics**: Visualizes Net Revenue, Total Sales, Total Expenses, and Active Customer Counts over custom or preset periods (Week, Month, Year).
 - **Interactive Revenue Trends**: Powered by dynamic Recharts showing comparative daily sales against operational expenses.
 - **Granular Visibility Controls**: Supports privacy flags (`Shared` vs `Only Me`) for sales and expenses records to manage team-wide vs personal view rights.
-- **Role-Based Views**: Configured with user profiles (e.g., Admin vs User roles) determining data scope.
+- **Role-Based Views & Permissions**: Configured with user profiles (`admin` vs `moderator` / user view). Both admin and standard user views can view, edit, and delete logged sales and expenses with automatic real-time account balance adjustments, while administrative visibility controls (`Shared` vs `Only Me`) remain reserved for admins.
 - **Inventory & Transaction Records**: Itemized sales registration, transaction tracking (supporting payment services like KPay / Aya), and customer purchase history.
 - **Optimized UI Components**: Integrated custom, reusable confirmation dialogs, validation labels, and firestore-backed cursor pagination controls.
 
@@ -210,12 +210,16 @@ exports/
 }
 ```
 
----
-
 ### Running Unit Tests (Zero Database Contact)
 
-The export serialization and CLI parsing logic includes unit tests that execute in complete isolation without establishing any network or database connections:
+The test suites execute in complete isolation without establishing any network or database connections:
+- **Expense Validation & Permissions**: Tests input validation and role authorization rules.
+- **Export Data Serialization & CLI Argument Parser**: Tests Firestore serialization, timestamp transformations, and CLI option parsing.
 
 ```bash
+# Run all unit tests
+npm test
+
+# Run export-specific tests
 npm run test:export
 ```

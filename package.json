@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "export:data": "node --env-file=.env.local --experimental-strip-types scripts/export/run.ts",
+    "test": "node --test --experimental-strip-types tests/*.test.ts scripts/export/__tests__/*.test.ts",
     "test:export": "node --test --experimental-strip-types scripts/export/__tests__/serializer.test.ts"
   },
   "dependencies": {

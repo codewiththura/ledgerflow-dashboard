@@ -3,13 +3,11 @@
 import React, { useState } from "react";
 import {
   collection,
-  addDoc,
   query,
   where,
   orderBy,
   doc,
   updateDoc,
-  deleteDoc,
   onSnapshot,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -61,6 +59,7 @@ import { RequiredLabel } from "@/components/required-label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useFirestorePagination } from "@/hooks/use-firestore-pagination";
 import { PaginationControls } from "@/components/pagination-controls";
+import { validateExpenseInput } from "@/lib/expense-utils";
 
 interface Expense {
   id: string;
@@ -179,22 +178,15 @@ export default function ExpensesPage() {
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    const parsedAmount = parseFloat(amount);
 
-    if (!title.trim()) {
-      setFormError("Expense title is required.");
-      return;
-    }
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      setFormError("Amount must be a valid positive number.");
-      return;
-    }
-    if (!accountId) {
-      setFormError("Please select a payment account.");
-      return;
-    }
-    if (!date) {
-      setFormError("Date is required.");
+    const validation = validateExpenseInput({
+      title,
+      amount,
+      accountId,
+      date,
+    });
+    if (!validation.isValid) {
+      setFormError(validation.error);
       return;
     }
 
@@ -206,7 +198,7 @@ export default function ExpensesPage() {
       await createExpenseTransaction(
         {
           title: title.trim(),
-          amount: parsedAmount,
+          amount: validation.parsedAmount,
           date: date,
           note: note.trim(),
           shared: isShared,
@@ -228,9 +220,11 @@ export default function ExpensesPage() {
       }
       setCreateDialogOpen(false);
       await refresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error creating expense:", err);
-      setFormError(err.message || "Failed to save expense.");
+      setFormError(
+        err instanceof Error ? err.message : "Failed to save expense."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -254,30 +248,23 @@ export default function ExpensesPage() {
     if (!editingExpense) return;
 
     setEditFormError(null);
-    const parsedAmount = parseFloat(editAmount);
 
-    if (!editTitle.trim()) {
-      setEditFormError("Expense title is required.");
-      return;
-    }
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      setEditFormError("Amount must be a valid positive number.");
-      return;
-    }
-    if (!editAccountId) {
-      setEditFormError("Please select a payment account.");
-      return;
-    }
-    if (!editDate) {
-      setEditFormError("Date is required.");
+    const validation = validateExpenseInput({
+      title: editTitle,
+      amount: editAmount,
+      accountId: editAccountId,
+      date: editDate,
+    });
+    if (!validation.isValid) {
+      setEditFormError(validation.error);
       return;
     }
 
     setUpdating(true);
     try {
-      const updatedFields: any = {
+      const updatedFields: Partial<Expense> = {
         title: editTitle.trim(),
-        amount: parsedAmount,
+        amount: validation.parsedAmount,
         date: editDate,
         note: editNote.trim(),
         expenseType: editExpenseType,
@@ -296,9 +283,11 @@ export default function ExpensesPage() {
       setEditDialogOpen(false);
       setEditingExpense(null);
       await refresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error updating expense:", err);
-      setEditFormError(err.message || "Failed to update expense.");
+      setEditFormError(
+        err instanceof Error ? err.message : "Failed to update expense."
+      );
     } finally {
       setUpdating(false);
     }
@@ -583,26 +572,24 @@ export default function ExpensesPage() {
                       )}
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {(profile?.role === "admin" || expense.shared) && (
-                            <Button
-                              onClick={() => handleOpenEdit(expense)}
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-primary border-border"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {profile?.role === "admin" && (
-                            <Button
-                              onClick={() => triggerDelete(expense.id)}
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
+                          <Button
+                            onClick={() => handleOpenEdit(expense)}
+                            size="icon"
+                            variant="outline"
+                            className="h-8 w-8 text-primary border-border"
+                            title="Edit Expense"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            onClick={() => triggerDelete(expense.id)}
+                            size="icon"
+                            variant="outline"
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20"
+                            title="Delete Expense"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
